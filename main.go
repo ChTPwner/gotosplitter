@@ -8,28 +8,24 @@ import (
 	"syscall"
 
 	"goto_splitter/config"
-	"goto_splitter/livesplit"
+	"goto_splitter/coordinator"
 )
 
 func main() {
 	cfg := config.Load()
-	server := livesplit.NewServer(cfg.LiveSplitAddress, func(connected bool, count int) {
-		log.Printf("LiveSplit One clients connected: %d (connected: %t)", count, connected)
-	})
-	if err := server.Start(); err != nil {
-		log.Fatalf("failed to start LiveSplit One server: %v", err)
-	}
-	log.Printf("LiveSplit One WebSocket server listening at %s", server.URL())
+	c := coordinator.NewCoordinator(cfg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	select {
-	case <-ctx.Done():
-	case err := <-server.Errors():
-		log.Printf("LiveSplit One server stopped unexpectedly: %v", err)
-	}
 
-	if err := server.Stop(); err != nil {
-		log.Printf("failed to stop LiveSplit One server cleanly: %v", err)
+	if err := c.Start(ctx); err != nil {
+		log.Fatalf("failed to start coordinator: %v", err)
+	}
+	log.Printf("GotoSplitter runtime started; LiveSplit server listening at %s", c.ServerURL())
+
+	<-ctx.Done()
+	log.Println("shutting down GotoSplitter")
+	if err := c.Stop(); err != nil {
+		log.Printf("failed to stop coordinator cleanly: %v", err)
 	}
 }
