@@ -35,7 +35,11 @@ type Coordinator struct {
 // NewCoordinator builds a coordinator from the supplied configuration.
 func NewCoordinator(cfg *config.Config) *Coordinator {
 	if cfg == nil {
-		cfg = config.Load()
+		var err error
+		cfg, err = config.Load()
+		if err != nil {
+			log.Printf("failed to load configuration: %v", err)
+		}
 	}
 	return &Coordinator{
 		cfg:          cfg,
@@ -47,7 +51,11 @@ func NewCoordinator(cfg *config.Config) *Coordinator {
 // Start boots the coordinator and launches the background runtime loop.
 func (c *Coordinator) Start(ctx context.Context) error {
 	if c.cfg == nil {
-		c.cfg = config.Load()
+		var err error
+		c.cfg, err = config.Load()
+		if err != nil {
+			return fmt.Errorf("load configuration: %w", err)
+		}
 	}
 
 	if err := c.loadDefinition(); err != nil {

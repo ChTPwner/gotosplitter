@@ -13,7 +13,7 @@
 
 ### Core Operational Principles
 1. **LiveSplit One WebSocket Server**: GotoSplitter hosts a WebSocket server that the LiveSplit One web/desktop client connects to as a client. GotoSplitter dispatches timer actions (`start`, `split`, `reset`, etc.) to LiveSplit One and immediately resets to an empty or no-op action once consumed to prevent repeated triggers.
-2. **SNI / QUsb2Snes Client**: GotoSplitter connects as a client to the local QUsb2Snes or SNI service (typically `ws://localhost:8080` or `ws://localhost:23074`), enumerates devices (`DeviceList`), attaches to the active SNES hardware or emulator (`Attach`), and reads RAM (`GetAddress`).
+2. **SNI / QUsb2Snes Client**: GotoSplitter connects by default to `ws://127.0.0.1:23074` (configurable via `GOTOSPLITTER_SNI_ADDRESS` or `$HOME/.config/gotosplitter/config.json`), enumerates devices (`DeviceList`), attaches to the active SNES hardware or emulator (`Attach`), and reads RAM (`GetAddress`).
 3. **Definition-Driven Event Matching**: Compatible with the [ChTPwner/Usb2Snes-Livesplit-Definitions](https://github.com/ChTPwner/Usb2Snes-Livesplit-Definitions) specification. GotoSplitter identifies the game and current split, matches it against definition rules (such as `eq`, `bit`, `weq`, `more`, `next`), and reads memory.
 4. **Optimized Ordered Polling**: To minimize overhead and eliminate unnecessary calls over the SNI socket, GotoSplitter monitors **only the memory address of the current active event**. If split names cannot be read dynamically from LiveSplit One, an ordered events file (`events.json`) mapped by game/category is used.
 5. **User Interface & State Persistence**: A clear, responsive UI displays real-time connection statuses (SNI & LiveSplit One), allows manual selection of definition and event files when auto-detection is not possible, and saves user preferences across restarts.
@@ -88,7 +88,7 @@ graph TD
 ### 3.3 `@sni-agent` (QUsb2Snes / SNI Bridge Specialist)
 - **Mission:** Manage the low-level connection, device management, and memory reading from QUsb2Snes / SNI servers.
 - **Responsibilities:**
-  - Connect as a WebSocket client to `ws://localhost:8080` (SNI) or `ws://localhost:23074` (QUsb2Snes).
+  - Connect as a WebSocket client to `ws://127.0.0.1:23074` by default; `GOTOSPLITTER_SNI_ADDRESS` overrides the `sni_address` value in `$HOME/.config/gotosplitter/config.json`.
   - Implement the standard JSON opcode protocol:
     1. `DeviceList`: Discover connected SNES devices/emulators.
     2. `Attach`: Attach to the designated device (or auto-select the first available SNES device).
@@ -124,7 +124,7 @@ graph TD
     - **Definition File Picker:** Dropdown listing files from `definitions/`, with manual override.
     - **Events File Picker:** Dropdown listing files from `events/`, with manual override.
   - **Settings Persistence:**
-    - Save and load settings to `config.json` (last used definition file, last used events file, server ports, target device name).
+    - Save and load settings to `$HOME/.config/gotosplitter/config.json` (last used definition file, last used events file, server ports, target device name).
 - **Rules & Constraints:**
   - Keep UI interactions non-blocking; UI thread must never freeze when waiting on network or memory reads.
   - Fallback cleanly to CLI/headless mode if no display server is available.
@@ -164,7 +164,7 @@ graph TD
 
 ### 4.2 QUsb2Snes / SNI Protocol Specification
 - **Role:** GotoSplitter is the **Client**; QUsb2Snes / SNI is the **Server**.
-- **Default Port:** `ws://localhost:8080` (SNI) or `ws://localhost:23074` (QUsb2Snes).
+- **Default Port:** `ws://127.0.0.1:23074` (configurable via `GOTOSPLITTER_SNI_ADDRESS` or `$HOME/.config/gotosplitter/config.json`).
 - **Protocol Flow:**
   1. **Connect:** Open WebSocket connection.
   2. **Device Discovery:**
