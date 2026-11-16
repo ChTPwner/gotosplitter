@@ -1,6 +1,7 @@
 package livesplit
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,8 +11,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func TestClientSendNormalizesStartAndSplit(t *testing.T) {
-	messages := make(chan string, 2)
+func TestClientSendUsesLiveSplitJSONCommands(t *testing.T) {
+	messages := make(chan string, 3)
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -22,13 +23,17 @@ func TestClientSendNormalizesStartAndSplit(t *testing.T) {
 		}
 		defer conn.Close()
 
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 3; i++ {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
 				t.Errorf("read websocket message: %v", err)
 				return
 			}
 			messages <- string(msg)
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"success":null}`)); err != nil {
+				t.Errorf("write protocol response: %v", err)
+				return
+			}
 		}
 	}))
 	defer server.Close()
@@ -45,13 +50,24 @@ func TestClientSendNormalizesStartAndSplit(t *testing.T) {
 	if err := client.Send("split"); err != nil {
 		t.Fatalf("send split: %v", err)
 	}
+	if err := client.ResetAttempt(true); err != nil {
+		t.Fatalf("send reset: %v", err)
+	}
 
-	expected := []string{"starttimer", "split"}
-	for i := 0; i < 2; i++ {
+	expected := []string{
+		`{"command":"start"}`,
+		`{"command":"split"}`,
+		`{"command":"reset","saveAttempt":true}`,
+	}
+	for i := range expected {
 		select {
 		case msg := <-messages:
 			if msg != expected[i] {
 				t.Fatalf("expected %q at index %d, got %q", expected[i], i, msg)
+			}
+			var command map[string]any
+			if err := json.Unmarshal([]byte(msg), &command); err != nil {
+				t.Fatalf("message %q is not a JSON protocol command: %v", msg, err)
 			}
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for websocket messages")

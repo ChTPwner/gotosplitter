@@ -2,14 +2,15 @@ package livesplit
 
 import (
 	"fmt"
-	"strings"
+	"sync"
 
 	"github.com/gorilla/websocket"
 )
 
 type Client struct {
-	conn *websocket.Conn
-	url  string
+	conn    *websocket.Conn
+	url     string
+	writeMu sync.Mutex
 }
 
 func NewClient(url string) *Client {
@@ -48,14 +49,38 @@ func (c *Client) Send(action string) error {
 		return fmt.Errorf("not connected")
 	}
 
-	action = normalizeAction(action)
-	if action == "" {
-		return nil
+	command, err := actionCommand(action)
+	if err != nil {
+		return err
+	}
+	message, err := encodeCommand(command)
+	if err != nil {
+		return err
 	}
 
-	if strings.TrimSpace(action) == "" {
-		return nil
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+		return fmt.Errorf("send LiveSplit One command: %w", err)
+	}
+	return nil
+}
+
+// ResetAttempt sends a timer reset with an explicit attempt-history decision.
+func (c *Client) ResetAttempt(saveAttempt bool) error {
+	if c.conn == nil {
+		return fmt.Errorf("not connected")
 	}
 
-	return c.conn.WriteMessage(websocket.TextMessage, []byte(action))
+	message, err := encodeCommand(protocolCommand{Command: "reset", SaveAttempt: &saveAttempt})
+	if err != nil {
+		return err
+	}
+
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+		return fmt.Errorf("send LiveSplit One reset command: %w", err)
+	}
+	return nil
 }

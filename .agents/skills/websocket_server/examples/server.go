@@ -2,8 +2,11 @@ package examples
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,7 +105,7 @@ func (s *Server) run(ctx context.Context) {
 			}
 
 		case message := <-s.broadcast:
-			s.mu.RLock()
+			s.mu.Lock()
 			for client := range s.clients {
 				select {
 				case client.send <- message:
@@ -111,21 +114,51 @@ func (s *Server) run(ctx context.Context) {
 					delete(s.clients, client)
 				}
 			}
-			s.mu.RUnlock()
+			s.mu.Unlock()
 		}
 	}
 }
 
-// DispatchAction sends an action to LiveSplit One and immediately clears it.
-func (s *Server) DispatchAction(action string) {
-	if action == "" {
-		return
+// DispatchAction sends one JSON command and does not send an empty clearing frame.
+func (s *Server) DispatchAction(action string) error {
+	command := strings.ToLower(strings.TrimSpace(action))
+	switch command {
+	case "start", "starttimer":
+		command = "start"
+	case "split", "pause", "resume":
+	case "splitorstart":
+		command = "splitOrStart"
+	case "undo":
+		command = "undoSplit"
+	case "skip":
+		command = "skipSplit"
+	case "reset":
+		return errors.New("reset requires an explicit save-attempt decision")
+	default:
+		return errors.New("unsupported LiveSplit One action")
 	}
-	// Step 1: Send the trigger action
-	s.broadcast <- []byte(action)
 
-	// Step 2: Mandatory immediate clearing to avoid repeated triggers
-	s.broadcast <- []byte("")
+	return s.dispatchCommand(command, nil)
+}
+
+func (s *Server) ResetAttempt(saveAttempt bool) error {
+	return s.dispatchCommand("reset", &saveAttempt)
+}
+
+func (s *Server) dispatchCommand(command string, saveAttempt *bool) error {
+	message, err := json.Marshal(struct {
+		Command     string `json:"command"`
+		SaveAttempt *bool  `json:"saveAttempt,omitempty"`
+	}{Command: command, SaveAttempt: saveAttempt})
+	if err != nil {
+		return err
+	}
+	select {
+	case s.broadcast <- message:
+		return nil
+	default:
+		return errors.New("LiveSplit command queue is full")
+	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -158,9 +191,28 @@ func (c *Client) readPump() {
 		_ = c.conn.Close()
 	}()
 	for {
-		_, _, err := c.conn.ReadMessage()
+		messageType, message, err := c.conn.ReadMessage()
 		if err != nil {
-			break
+			return
+		}
+		if messageType != websocket.TextMessage {
+			log.Printf("[LiveSplit WS] Ignoring non-text protocol response")
+			continue
+		}
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(message, &envelope); err != nil {
+			log.Printf("[LiveSplit WS] Invalid protocol response: %v", err)
+			continue
+		}
+		switch {
+		case envelope["event"] != nil:
+			log.Printf("[LiveSplit WS] Timer event: %s", envelope["event"])
+		case envelope["error"] != nil:
+			log.Printf("[LiveSplit WS] Command error: %s", envelope["error"])
+		case envelope["success"] != nil:
+			log.Printf("[LiveSplit WS] Command succeeded: %s", envelope["success"])
+		default:
+			log.Printf("[LiveSplit WS] Unrecognized protocol response: %s", message)
 		}
 	}
 }

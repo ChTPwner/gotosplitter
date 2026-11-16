@@ -25,9 +25,12 @@ type Coordinator struct {
 	trackers     *engine.NextTracker
 	pollInterval time.Duration
 
-	mu         sync.Mutex
-	runStarted bool
-	splitIndex int
+	operationMu        sync.Mutex
+	mu                 sync.Mutex
+	runStarted         bool
+	splitIndex         int
+	currentSplitName   string
+	unmatchedSplitName string
 }
 
 // NewCoordinator builds a coordinator from the supplied configuration.
@@ -64,11 +67,21 @@ func (c *Coordinator) Start(ctx context.Context) error {
 		c.server = livesplit.NewServer(c.cfg.LiveSplitAddress, func(connected bool, count int) {
 			log.Printf("LiveSplit One clients connected: %d (connected=%t)", count, connected)
 		})
-		c.server.SetMetadataCallback(func(metadata livesplit.RunMetadata) {
-			log.Printf("LiveSplit metadata: game=%q category=%q split=%q", metadata.GameName, metadata.CategoryName, metadata.CurrentSplitName)
-			if metadata.CurrentSplitName == "" && c.hasActiveRun() {
+		c.server.SetSplitCallback(func(status livesplit.SplitStatus) {
+			if status.Running {
+				c.mu.Lock()
+				c.currentSplitName = status.CurrentSplitName
+				c.unmatchedSplitName = ""
+				c.mu.Unlock()
+				log.Printf("LiveSplit One current split: %q", status.CurrentSplitName)
+				return
+			}
+			if c.hasActiveRun() {
 				c.resetRunState()
 			}
+		})
+		c.server.SetErrorCallback(func(err error) {
+			log.Printf("LiveSplit One protocol: %v", err)
 		})
 	}
 	if err := c.server.Start(); err != nil {
@@ -156,6 +169,9 @@ func (c *Coordinator) loadDefinition() error {
 // SetGameDefinition updates the active definition and persists the selection.
 // An empty filename clears the active definition while retaining the folder.
 func (c *Coordinator) SetGameDefinition(folder, filename string) error {
+	c.operationMu.Lock()
+	defer c.operationMu.Unlock()
+
 	if folder == "" {
 		defaultFolder, err := config.DefaultGameDefinitionFolder()
 		if err != nil {
@@ -197,6 +213,8 @@ func (c *Coordinator) SetGameDefinition(folder, filename string) error {
 	c.definition = def
 	c.runStarted = false
 	c.splitIndex = 0
+	c.currentSplitName = ""
+	c.unmatchedSplitName = ""
 	c.trackers.Reset()
 	c.mu.Unlock()
 	return nil
@@ -219,6 +237,9 @@ func (c *Coordinator) runLoop(ctx context.Context) {
 }
 
 func (c *Coordinator) pollOnce() error {
+	c.operationMu.Lock()
+	defer c.operationMu.Unlock()
+
 	if c.server == nil {
 		return nil
 	}
@@ -234,12 +255,16 @@ func (c *Coordinator) pollOnce() error {
 		}
 		log.Printf("SNI connected to %s", c.sniClient.AttachedDevice())
 	}
+	if c.server.ConnectedClients() == 0 {
+		return nil
+	}
 
 	c.mu.Lock()
 	def := c.definition
 	tracker := c.trackers
 	runStarted := c.runStarted
 	splitIndex := c.splitIndex
+	currentSplitName := c.currentSplitName
 	c.mu.Unlock()
 	if def == nil {
 		return nil
@@ -248,6 +273,7 @@ func (c *Coordinator) pollOnce() error {
 		if def.Autostart == nil {
 			c.mu.Lock()
 			c.runStarted = true
+			c.currentSplitName = ""
 			c.mu.Unlock()
 			return nil
 		}
@@ -256,15 +282,45 @@ func (c *Coordinator) pollOnce() error {
 			return err
 		}
 		if matched {
+			if err := c.dispatchAction("start"); err != nil {
+				return err
+			}
 			c.mu.Lock()
 			c.runStarted = true
+			c.currentSplitName = ""
 			c.mu.Unlock()
-			c.dispatchAction("start")
 		}
 		return nil
 	}
 
-	if splitIndex >= len(def.Definitions) {
+	if c.cfg.EventFile == "" {
+		if currentSplitName == "" {
+			if c.server.ConnectedClients() == 0 {
+				return nil
+			}
+			return c.server.RequestCurrentSplitName()
+		}
+		splitIndex = -1
+		for i := range def.Definitions {
+			if def.Definitions[i].Name == currentSplitName {
+				splitIndex = i
+				break
+			}
+		}
+		if splitIndex < 0 {
+			c.mu.Lock()
+			shouldLog := c.unmatchedSplitName != currentSplitName
+			c.unmatchedSplitName = currentSplitName
+			c.mu.Unlock()
+			if shouldLog {
+				log.Printf("LiveSplit current split %q has no matching definition", currentSplitName)
+			}
+			return nil
+		}
+		c.mu.Lock()
+		c.unmatchedSplitName = ""
+		c.mu.Unlock()
+	} else if splitIndex >= len(def.Definitions) {
 		return nil
 	}
 	matched, err := engine.Evaluate(&def.Definitions[splitIndex], c.sniClient)
@@ -272,9 +328,12 @@ func (c *Coordinator) pollOnce() error {
 		return err
 	}
 	if matched {
-		c.dispatchAction("split")
+		if err := c.dispatchAction("split"); err != nil {
+			return err
+		}
 		c.mu.Lock()
 		c.splitIndex++
+		c.currentSplitName = ""
 		c.mu.Unlock()
 	}
 	return nil
@@ -291,18 +350,39 @@ func (c *Coordinator) resetRunState() {
 	defer c.mu.Unlock()
 	c.runStarted = false
 	c.splitIndex = 0
+	c.currentSplitName = ""
+	c.unmatchedSplitName = ""
 	if c.trackers != nil {
 		c.trackers.Reset()
 	}
 }
 
-func (c *Coordinator) dispatchAction(action string) {
+func (c *Coordinator) dispatchAction(action string) error {
 	if c.server == nil || action == "" {
-		return
+		return nil
 	}
 	if action == "reset" {
-		c.resetRunState()
+		return fmt.Errorf("reset requires an explicit attempt-history decision")
 	}
-	c.server.DispatchAction(action)
+	if err := c.server.DispatchAction(action); err != nil {
+		return err
+	}
 	log.Printf("Dispatching LiveSplit action: %s", action)
+	return nil
+}
+
+// ResetTimer asks LiveSplit One to reset with an explicit attempt-history choice.
+func (c *Coordinator) ResetTimer(saveAttempt bool) error {
+	c.operationMu.Lock()
+	defer c.operationMu.Unlock()
+
+	if c.server == nil {
+		return fmt.Errorf("LiveSplit server is not running")
+	}
+	if err := c.server.ResetAttempt(saveAttempt); err != nil {
+		return err
+	}
+	c.resetRunState()
+	log.Printf("Reset LiveSplit timer (save attempt=%t)", saveAttempt)
+	return nil
 }

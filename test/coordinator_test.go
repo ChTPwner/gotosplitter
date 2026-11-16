@@ -34,6 +34,7 @@ func TestCoordinatorStartsAutostartAndSplitSequence(t *testing.T) {
 	defer c.Stop()
 
 	lsMock := NewMockLiveSplit("")
+	lsMock.SetCurrentSplitName("Landing Site")
 	if err := lsMock.Connect(c.ServerURL()); err != nil {
 		t.Fatalf("connect mock LiveSplit: %v", err)
 	}
@@ -43,7 +44,7 @@ func TestCoordinatorStartsAutostartAndSplitSequence(t *testing.T) {
 	sniMock.SetByte(0x0998, 0x02)
 	sniMock.SetByte(0x0DE2, 0x0C)
 
-	if err := lsMock.WaitForAction("starttimer", 2*time.Second); err != nil {
+	if err := lsMock.WaitForAction("start", 2*time.Second); err != nil {
 		t.Fatalf("did not receive start action: %v", err)
 	}
 

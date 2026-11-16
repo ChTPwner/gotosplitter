@@ -12,14 +12,18 @@ import (
 
 // MockLiveSplit represents a mock LiveSplit One client for testing
 type MockLiveSplit struct {
-	conn         *websocket.Conn
-	mutex        sync.RWMutex
-	port         string
-	targetURL    string
-	messageQueue []string
-	messageMutex sync.RWMutex
-	stopChan     chan struct{}
-	connected    bool
+	conn             *websocket.Conn
+	mutex            sync.RWMutex
+	port             string
+	targetURL        string
+	messageQueue     []string
+	messageMutex     sync.RWMutex
+	stopChan         chan struct{}
+	connected        bool
+	currentSplitName string
+	timerState       string
+	currentIndex     int
+	lastSaveAttempt  *bool
 }
 
 // NewMockLiveSplit creates a new mock LiveSplit client
@@ -28,6 +32,7 @@ func NewMockLiveSplit(port string) *MockLiveSplit {
 		port:         port,
 		messageQueue: make([]string, 0),
 		stopChan:     make(chan struct{}),
+		timerState:   "NotRunning",
 	}
 }
 
@@ -91,19 +96,134 @@ func (m *MockLiveSplit) readLoop(conn *websocket.Conn) {
 		default:
 		}
 
-		_, message, err := conn.ReadMessage()
+		messageType, message, err := conn.ReadMessage()
 		if err != nil {
 			m.mutex.Lock()
 			m.connected = false
 			m.mutex.Unlock()
 			return
 		}
+		if messageType != websocket.TextMessage {
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"error":{"code":"InvalidCommand"}}`))
+			continue
+		}
+		if !m.handleCommand(conn, message) {
+			return
+		}
+	}
+}
 
-		msgStr := string(message)
+func (m *MockLiveSplit) handleCommand(conn *websocket.Conn, message []byte) bool {
+	var request struct {
+		Command     string `json:"command"`
+		Index       *int   `json:"index"`
+		SaveAttempt *bool  `json:"saveAttempt"`
+	}
+	if err := json.Unmarshal(message, &request); err != nil || request.Command == "" {
+		return writeProtocolMessage(conn, `{"error":{"code":"InvalidCommand"}}`)
+	}
+
+	var response any = nil
+	var event string
+	recordAction := false
+	m.mutex.Lock()
+	switch request.Command {
+	case "start":
+		m.timerState = "Running"
+		m.currentIndex = 0
+		event = "Started"
+		recordAction = true
+	case "split":
+		if m.timerState == "Running" || m.timerState == "Paused" {
+			m.currentIndex++
+		}
+		m.currentSplitName = ""
+		event = "Splitted"
+		recordAction = true
+	case "reset":
+		m.timerState = "NotRunning"
+		m.currentIndex = 0
+		if request.SaveAttempt != nil {
+			saveAttempt := *request.SaveAttempt
+			m.lastSaveAttempt = &saveAttempt
+		} else {
+			m.lastSaveAttempt = nil
+		}
+		event = "Reset"
+		recordAction = true
+	case "pause":
+		m.timerState = "Paused"
+		event = "Paused"
+		recordAction = true
+	case "resume":
+		m.timerState = "Running"
+		event = "Resumed"
+		recordAction = true
+	case "undoSplit":
+		if m.currentIndex > 0 {
+			m.currentIndex--
+		}
+		event = "UndoSplit"
+		recordAction = true
+	case "skipSplit":
+		m.currentIndex++
+		event = "Skipped"
+		recordAction = true
+	case "getCurrentState":
+		state := map[string]any{"state": m.timerState}
+		if m.timerState == "Running" || m.timerState == "Paused" {
+			state["index"] = m.currentIndex
+		}
+		response = state
+	case "getSegmentName":
+		response = m.currentSplitName
+	default:
+		m.mutex.Unlock()
+		return writeProtocolMessage(conn, `{"error":{"code":"InvalidCommand"}}`)
+	}
+	m.mutex.Unlock()
+
+	if recordAction {
 		m.messageMutex.Lock()
-		m.messageQueue = append(m.messageQueue, msgStr)
+		m.messageQueue = append(m.messageQueue, request.Command)
 		m.messageMutex.Unlock()
 	}
+	if event != "" {
+		if !writeProtocolJSON(conn, map[string]string{"event": event}) {
+			return false
+		}
+	}
+	return writeProtocolJSON(conn, map[string]any{"success": response})
+}
+
+// SetCurrentSplitName configures the name returned for split-name requests.
+func (m *MockLiveSplit) SetCurrentSplitName(name string) {
+	m.mutex.Lock()
+	m.currentSplitName = name
+	m.mutex.Unlock()
+}
+
+// LastSaveAttempt returns the choice sent with the most recent reset command.
+func (m *MockLiveSplit) LastSaveAttempt() *bool {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	if m.lastSaveAttempt == nil {
+		return nil
+	}
+	saveAttempt := *m.lastSaveAttempt
+	return &saveAttempt
+}
+
+func writeProtocolMessage(conn *websocket.Conn, message string) bool {
+	return conn.WriteMessage(websocket.TextMessage, []byte(message)) == nil
+}
+
+func writeProtocolJSON(conn *websocket.Conn, message any) bool {
+	data, err := json.Marshal(message)
+	if err != nil {
+		return false
+	}
+	return conn.WriteMessage(websocket.TextMessage, data) == nil
 }
 
 // GetMessages returns all received messages
@@ -134,25 +254,6 @@ func (m *MockLiveSplit) ClearMessages() {
 	m.messageQueue = m.messageQueue[:0]
 }
 
-// VerifyImmediateClearing verifies that every non-empty action is immediately followed by an empty frame
-func (m *MockLiveSplit) VerifyImmediateClearing() error {
-	m.messageMutex.RLock()
-	defer m.messageMutex.RUnlock()
-
-	for i, msg := range m.messageQueue {
-		if msg != "" {
-			if i+1 >= len(m.messageQueue) {
-				return fmt.Errorf("action %q at index %d was not cleared (no subsequent message received)", msg, i)
-			}
-			nextMsg := m.messageQueue[i+1]
-			if nextMsg != "" {
-				return fmt.Errorf("action %q at index %d not immediately cleared; next message is %q", msg, i, nextMsg)
-			}
-		}
-	}
-	return nil
-}
-
 // WaitForAction blocks until the given action is recorded in the message queue, or times out
 func (m *MockLiveSplit) WaitForAction(action string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
@@ -168,45 +269,4 @@ func (m *MockLiveSplit) WaitForAction(action string, timeout time.Duration) erro
 		time.Sleep(10 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for action %q (messages received: %v)", action, m.GetMessages())
-}
-
-// SendGameInfo sends game information to GotoSplitter
-func (m *MockLiveSplit) SendGameInfo(gameName, categoryName string) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	if m.conn == nil {
-		return fmt.Errorf("not connected")
-	}
-
-	gameInfo := map[string]interface{}{
-		"gameName":     gameName,
-		"categoryName": categoryName,
-	}
-
-	data, err := json.Marshal(gameInfo)
-	if err != nil {
-		return err
-	}
-
-	return m.conn.WriteMessage(websocket.TextMessage, data)
-}
-
-// SendQuery requests a supported metadata field from GotoSplitter.
-func (m *MockLiveSplit) SendQuery(command string) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	if m.conn == nil {
-		return fmt.Errorf("not connected")
-	}
-
-	data, err := json.Marshal(map[string]string{
-		"type":    "query",
-		"command": command,
-	})
-	if err != nil {
-		return err
-	}
-	return m.conn.WriteMessage(websocket.TextMessage, data)
 }

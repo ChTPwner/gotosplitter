@@ -75,10 +75,12 @@ graph TD
 | `chan engine.SplitAction` | Event Engine | Coordinator / LiveSplit | Transmits `"start"`, `"split"`, `"reset"` actions |
 | `chan sni.Status` | SNI Client | Coordinator / UI | Connection state (`Disconnected`, `Connecting`, `Attached`) |
 | `chan livesplit.Status` | LiveSplit Server | Coordinator / UI | Client count and connection state |
-| `chan engine.TrackingState` | Event Engine | UI | Active game, category, and target split name |
+| `chan engine.TrackingState` | Event Engine | UI | Selected game definition and target split name |
 | `chan config.Config` | UI | Coordinator | Runtime config updates (files, addresses) |
 
 Game-definition configuration uses `GameDefinitionFolder` and `CurrentGameDefinition`. The folder defaults to the directory containing `config.json`; the current value is a filename in that folder. If it is empty, select the first alphabetically sorted `.json` file. Startup must fail if there is no viable definition, reporting the error in the UI and terminal. Applying a UI selection loads it and resets run tracking.
+
+The LiveSplit One protocol provides timer state and segment names, but not game/category metadata. Keep the selected game definition explicit. When a timer reset is requested, ask the UI for an explicit Save/Discard choice; Cancel must not dispatch the reset or clear coordinator state.
 
 ---
 

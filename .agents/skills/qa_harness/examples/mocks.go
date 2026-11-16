@@ -92,28 +92,97 @@ func (s *MockSNIServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// MockLiveSplitClient captures actions and checks immediate clearing.
+// MockLiveSplitClient handles the JSON command protocol used by LiveSplit One.
 type MockLiveSplitClient struct {
-	messages []string
+	commands []string
+	state    string
+	index    int
+	segment  string
+	save     *bool
 	mu       sync.Mutex
 }
 
-func (c *MockLiveSplitClient) Record(msg string) {
+func (c *MockLiveSplitClient) HandleCommand(message []byte) (event, response []byte, err error) {
+	var request struct {
+		Command     string `json:"command"`
+		Index       *int   `json:"index"`
+		SaveAttempt *bool  `json:"saveAttempt"`
+	}
+	if err := json.Unmarshal(message, &request); err != nil || request.Command == "" {
+		response, err = json.Marshal(map[string]any{"error": map[string]string{"code": "InvalidCommand"}})
+		return nil, response, err
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.messages = append(c.messages, msg)
-}
+	if c.state == "" {
+		c.state = "NotRunning"
+	}
+	var result any
+	var timerEvent string
+	switch request.Command {
+	case "start":
+		c.state = "Running"
+		c.index = 0
+		timerEvent = "Started"
+		c.commands = append(c.commands, request.Command)
+	case "split":
+		c.index++
+		timerEvent = "Splitted"
+		c.commands = append(c.commands, request.Command)
+	case "reset":
+		if request.SaveAttempt == nil {
+			response, err = json.Marshal(map[string]any{"error": map[string]string{"code": "InvalidCommand"}})
+			return nil, response, err
+		}
+		save := *request.SaveAttempt
+		c.save = &save
+		c.state = "NotRunning"
+		c.index = 0
+		timerEvent = "Reset"
+		c.commands = append(c.commands, request.Command)
+	case "getCurrentState":
+		result = map[string]any{"state": c.state}
+		if c.state == "Running" || c.state == "Paused" {
+			result.(map[string]any)["index"] = c.index
+		}
+	case "getSegmentName":
+		result = c.segment
+	default:
+		response, err = json.Marshal(map[string]any{"error": map[string]string{"code": "InvalidCommand"}})
+		return nil, response, err
+	}
 
-func (c *MockLiveSplitClient) AssertImmediateClearing() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for i := 0; i < len(c.messages)-1; i++ {
-		if c.messages[i] != "" && c.messages[i] != "query" {
-			if c.messages[i+1] != "" {
-				return fmt.Errorf("action %q at index %d was not immediately cleared", c.messages[i], i)
-			}
+	if timerEvent != "" {
+		event, err = json.Marshal(map[string]string{"event": timerEvent})
+		if err != nil {
+			return nil, nil, err
 		}
 	}
-	return nil
+	response, err = json.Marshal(map[string]any{"success": result})
+	return event, response, err
+}
+
+func (c *MockLiveSplitClient) Commands() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	commands := make([]string, len(c.commands))
+	copy(commands, c.commands)
+	return commands
+}
+
+func (c *MockLiveSplitClient) SetSegmentName(name string) {
+	c.mu.Lock()
+	c.segment = name
+	c.mu.Unlock()
+}
+
+func (c *MockLiveSplitClient) LastSaveAttempt() *bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.save == nil {
+		return nil
+	}
+	save := *c.save
+	return &save
 }

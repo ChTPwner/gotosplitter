@@ -8,6 +8,7 @@ The settings file is stored at `$HOME/.config/gotosplitter/config.json`. Game de
 
 - `game_definition_folder`: the folder containing JSON definition files. By default, this is the same directory as `config.json`.
 - `current_game_definition`: the selected JSON filename within that folder, not a full path.
+- `event_file`: optional setting for the ordered-definition tracking path; it does not provide game or category metadata through LiveSplit One.
 
 For example:
 
@@ -21,6 +22,8 @@ For example:
 If `current_game_definition` is empty, GotoSplitter selects the first `.json` file alphabetically in the configured folder. The search is not recursive. Startup requires a viable definition: if the folder contains no JSON definitions, the selected file is missing, or the definition cannot be parsed, GotoSplitter displays the startup error in the UI, prints it in the terminal, and exits with a failure status. Correct the folder or filename in `config.json` and relaunch to recover.
 
 Use the **Browse** or **Use folder** controls to change the folder, then choose a filename from **Current game definition**. Changes are saved to `config.json` and the selected definition is applied immediately; changing the definition resets the current run tracking. Existing configurations using the old `game_definition` file path are migrated to the folder and filename settings when loaded.
+
+LiveSplit One does not expose game or category metadata through its WebSocket protocol, so choose the game definition in GotoSplitter. When no ordered event file is selected, GotoSplitter queries the timer state and current segment name using the supported `getCurrentState` and `getSegmentName` commands. The **Reset timer** control asks whether to save the attempt, discard it, or cancel; cancel sends no reset.
 
 ## Running
 

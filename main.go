@@ -29,7 +29,7 @@ func main() {
 	}
 	log.Printf("GotoSplitter runtime started; LiveSplit server listening at %s", c.ServerURL())
 
-	if err := ui.RunUI(ctx, cfg, c.SetGameDefinition); err != nil {
+	if err := ui.RunUI(ctx, cfg, c.SetGameDefinition, c.ResetTimer); err != nil {
 		log.Printf("UI stopped with an error: %v", err)
 	}
 	stop()

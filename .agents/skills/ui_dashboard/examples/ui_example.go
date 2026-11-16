@@ -11,8 +11,7 @@ type UIState struct {
 	SNIStatus       string `json:"sni_status"`
 	SNIAttached     bool   `json:"sni_attached"`
 	LiveSplitStatus string `json:"livesplit_status"`
-	CurrentGame     string `json:"current_game"`
-	CurrentCategory string `json:"current_category"`
+	GameDefinition  string `json:"game_definition"`
 	CurrentSplit    string `json:"current_split"`
 }
 
@@ -37,11 +36,10 @@ func (m *ModelStore) UpdateSNI(status string, attached bool) {
 	m.state.SNIAttached = attached
 }
 
-func (m *ModelStore) UpdateTracking(game, category, split string) {
+func (m *ModelStore) UpdateTracking(gameDefinition, split string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.state.CurrentGame = game
-	m.state.CurrentCategory = category
+	m.state.GameDefinition = gameDefinition
 	m.state.CurrentSplit = split
 }
 

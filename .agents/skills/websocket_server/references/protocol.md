@@ -1,54 +1,62 @@
 # LiveSplit One WebSocket Protocol Reference
 
-## 1. Overview & Connection Architecture
+Authoritative sources: [`server_protocol.rs`](https://github.com/LiveSplit/livesplit-core/blob/f7dfa59aea312217652ebad62aae0ea4e789e3fc/src/networking/server_protocol.rs) at the LiveSplit One submodule's pinned commit, and [`LiveSplitServer.ts`](https://github.com/LiveSplit/LiveSplitOne/blob/master/src/api/LiveSplitServer.ts), which passes incoming text frames to that protocol handler.
 
-- **Role:** GotoSplitter = WebSocket Server, LiveSplit One = Client.
-- **Default Endpoint:** `ws://localhost:16834` (or configurable in `config.json`).
-- **Origin / CORS:** LiveSplit One is commonly hosted at `https://one.livesplit.org`. The WebSocket HTTP upgrader must allow this origin or accept all origins (`CheckOrigin: func(r *http.Request) bool { return true }`).
+## 1. Connection and command direction
 
----
+- GotoSplitter hosts a WebSocket server; LiveSplit One connects as its client.
+- The LiveSplit One client treats every incoming text frame as a `livesplit-core` JSON command.
+- Commands and responses travel over the same connection. This is not a persistent action-state or metadata-query protocol.
 
-## 2. Timer Commands & Action Protocol
+## 2. Command frames
 
-GotoSplitter sends plain text frames or JSON command envelopes containing standard LiveSplit actions:
+Send a JSON object in one text frame. The pinned `livesplit-core` `Command` enum uses `#[serde(tag = "command", rename_all = "camelCase")]`, so the wire discriminators are lower-camel-case:
 
-| Action Command | Purpose | Effect in LiveSplit One |
-| :--- | :--- | :--- |
-| `"start"` | Start Timer | Starts the speedrun timer if currently stopped |
-| `"split"` | Trigger Split | Splits the current segment and moves to next |
-| `"reset"` | Reset Timer | Resets the timer to 00:00:00 |
-| `"pause"` | Pause Timer | Pauses active timer |
-| `"resume"` | Resume Timer | Resumes paused timer |
-| `"undo"` | Undo Split | Moves back to the previous split |
-| `"skip"` | Skip Split | Skips split without recording segment time |
-| `""` | No-Op / Clear | Clears active trigger to prevent duplicate firing |
-
-### The Immediate Action Clearing Requirement
-
-```
-Timeline:
-[T0] Event Engine detects memory match for split condition
-[T1] LiveSplit Server broadcasts text frame: "split"
-[T2] LiveSplit Server immediately broadcasts text frame: ""
+```json
+{"command":"start"}
+{"command":"split"}
+{"command":"splitOrStart"}
+{"command":"pause"}
+{"command":"resume"}
+{"command":"undoSplit"}
+{"command":"skipSplit"}
+{"command":"getCurrentState"}
+{"command":"getSegmentName","index":1}
+{"command":"reset","saveAttempt":false}
 ```
 
-**Why this is mandatory:**
-LiveSplit One's WebSocket integration checks the received action value. If GotoSplitter leaves the last sent message as `"split"`, reconnecting clients or re-evaluating clients will interpret `"split"` repeatedly. Sending `""` immediately ensures an edge-triggered split action.
+The source comment's `{"command":"SplitOrStart"}` example conflicts with the enum's `camelCase` serde annotation. GotoSplitter follows the actual enum annotation, using lower-camel-case values, and tests assert those wire spellings. Bare text such as `"split"`, `"starttimer"`, or `""` is not a valid command.
 
----
+`reset` takes an optional `saveAttempt` boolean. GotoSplitter asks the user to Save, Discard, or Cancel; Save sends `true`, Discard sends `false`, and Cancel sends nothing.
 
-## 3. Metadata Queries & Inbound Frames
+## 3. Responses and timer events
 
-When supported by the client version or when polling client state:
-- **Client to Server:** LiveSplit One or custom scripts may send queries such as:
-  - `"getCurrentSplitName"`
-  - `"getGameName"`
-  - `"getCategoryName"`
-  - Or structured JSON payloads:
-    ```json
-    {
-      "type": "query",
-      "command": "getCurrentSplitName"
-    }
-    ```
-- **Server Response:** GotoSplitter sends the requested string or JSON payload back on the client connection.
+Successful commands return a JSON envelope:
+
+```json
+{"success":null}
+{"success":"Segment Name"}
+{"success":{"state":"Running","index":1}}
+```
+
+Errors use an envelope such as:
+
+```json
+{"error":{"code":"NoRunInProgress"}}
+```
+
+Timer events are separate JSON text frames, for example:
+
+```json
+{"event":"Splitted"}
+```
+
+An event can arrive before the success response for the command that caused it. Ignore event-only frames when waiting for a command result; do not treat them as a second command response. The protocol has no request ID, so serialize outstanding commands per WebSocket connection.
+
+## 4. Current split tracking and metadata limits
+
+1. Send `getCurrentState`.
+2. For `Running` or `Paused`, read the returned `index` and send `getSegmentName` with that index.
+3. Treat `NotRunning` and `Ended` as no active segment.
+
+The protocol does not expose game or category metadata. Keep game-definition selection explicit in GotoSplitter; do not issue invented `getGameName`, `getCategoryName`, or `getCurrentSplitName` commands or expect raw-string replies.

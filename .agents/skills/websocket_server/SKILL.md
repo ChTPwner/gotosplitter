@@ -3,8 +3,8 @@ name: websocket-server
 description: >-
   Implements and manages GotoSplitter's LiveSplit One WebSocket server (ws://localhost:16834).
   Use this skill when developing the WebSocket server in livesplit/, dispatching timer actions
-  (start, split, reset, pause, resume), enforcing the immediate action clearing guarantee,
-  or querying LiveSplit One run metadata (game name, category, current split).
+  (start, split, reset, pause, resume), implementing the livesplit-core JSON request/response
+  protocol, or querying current timer state and segment names.
 ---
 
 # LiveSplit One WebSocket Server Skill (`@livesplit-agent`)
@@ -17,7 +17,7 @@ This skill defines the technical standards, protocol implementation, and operati
 
 - **Owning Agent:** `@livesplit-agent`
 - **Primary Package:** `livesplit/`
-- **Key Files:** `livesplit/server.go`, `livesplit/actions.go`, `livesplit/metadata.go`
+- **Key Files:** `livesplit/server.go`, `livesplit/client.go`, `livesplit/protocol.go`
 - **System Role:** GotoSplitter acts as the **WebSocket Server**; the LiveSplit One web or desktop client (`https://one.livesplit.org/`) connects to GotoSplitter as a **Client**.
 
 ```mermaid
@@ -29,9 +29,9 @@ sequenceDiagram
     LS->>GS: Connect (ws://localhost:16834)
     GS-->>C: Client Connected Notification
     C->>GS: Dispatch Action ("start" | "split" | "reset")
-    GS->>LS: Send Action Text Frame ("split")
-    Note over GS,LS: IMMEDIATE CLEARING GUARANTEE
-    GS->>LS: Send Empty Text Frame ("")
+    GS->>LS: Send JSON command {"command":"split"}
+    LS-->>GS: Optional event {"event":"Splitted"}
+    LS-->>GS: Response {"success":null}
 ```
 
 ---
@@ -48,25 +48,18 @@ sequenceDiagram
    - Prevent blocking or panics when writing to closed sockets.
 
 3. **Dispatch Timer Actions**:
-   - Supported standard commands:
-     - `"start"`: Start the run timer.
-     - `"split"`: Trigger current split and advance to the next.
-     - `"reset"`: Reset timer to zero.
-     - `"pause"`: Pause the running timer.
-     - `"resume"`: Resume paused timer.
-     - `"undo"`: Undo previous split.
-     - `"skip"`: Skip current split without timing.
+   - Send text frames containing JSON commands with lower-camel-case `command` values, such as `{"command":"start"}`, `{"command":"split"}`, and `{"command":"pause"}`.
+   - A reset must include the user's attempt-history choice: `{"command":"reset","saveAttempt":true|false}`.
+   - Do not send bare action strings or empty "clear" frames; each command is a request with its own response.
 
-4. **Mandatory Immediate Action Clearing Guarantee**:
-   > [!IMPORTANT]
-   > LiveSplit One samples the incoming action state. If an action like `"split"` remains in the buffer or state, LiveSplit One may register duplicate split triggers on consecutive ticks.
-   > **Implementation Rule:** Immediately after broadcasting an action (e.g. `"split"`), the server MUST broadcast an empty string `""` or no-op reset frame to clear the trigger state.
+4. **Handle Responses and Events**:
+   - A success is wrapped in `{"success": ...}`; a failure is wrapped in `{"error": ...}`.
+   - Timer events use `{"event": ...}` and may arrive before the corresponding success response. Do not consume an event as a command response.
+   - Serialize requests per connection because the protocol has no request IDs.
 
-5. **Query Run Metadata**:
-   - When supported by the client protocol (or requested via JSON/text queries), extract:
-     - Game Name: Used by `@event-engine-agent` to auto-load definitions.
-     - Category Name: Used by `@event-engine-agent` to match ordered events (`events.json`).
-     - Current Split Name: Used for dynamic split matching (Path A).
+5. **Query Timer State**:
+   - Use `getCurrentState` for the phase and active segment index, then `getSegmentName` for the segment's name.
+   - The protocol does not expose game or category metadata. Keep game-definition selection explicit and do not invent metadata queries.
 
 ---
 
@@ -79,8 +72,8 @@ See reference server implementation in [examples/server.go](./examples/server.go
 - **Address:** `localhost:16834` (configurable via `config.Config.LiveSplitAddress`)
 - **Transport:** WebSocket (RFC 6455)
 - **Message Types:**
-  - Timer commands dispatched as standard Text frames (`websocket.TextMessage`).
-  - Metadata queries/responses parsed as JSON or plaintext commands.
+  - Send commands as JSON in text frames (`websocket.TextMessage`).
+  - Parse JSON success/error/event envelopes; raw text commands and raw split-name replies are not part of this protocol.
 
 ### Thread Safety & Buffer Guidelines
 - Use a thread-safe hub pattern with mutex or dedicated write channels for each connected client.
@@ -103,15 +96,11 @@ See reference server implementation in [examples/server.go](./examples/server.go
    - Upgrade HTTP request to WebSocket.
    - Register client in active clients registry.
    - Spawn write pump and read pump goroutines.
-4. **Implement Action Broadcast with Immediate Clearing**:
+4. **Implement Action Dispatch and Response Handling**:
    ```go
-   func (s *Server) BroadcastAction(action string) {
-       s.mu.Lock()
-       defer s.mu.Unlock()
-       // 1. Broadcast the action
-       s.broadcast(action)
-       // 2. Immediately clear
-       s.broadcast("")
+   func (s *Server) DispatchAction(action string) error {
+       // Encode {"command":"split"}, send it once, and await success/error.
+       return s.dispatchCommand(protocolCommand{Command: action})
    }
    ```
 5. **Handle Graceful Disconnect**:
@@ -122,8 +111,10 @@ See reference server implementation in [examples/server.go](./examples/server.go
 ## 5. Verification & Validation Checklist
 
 - [ ] LiveSplit One (`https://one.livesplit.org/`) can connect to `ws://localhost:16834` without CORS errors.
-- [ ] Dispatching `"start"` starts the timer in LiveSplit One.
-- [ ] Dispatching `"split"` triggers exactly **one** split. Verify no double-split occurs due to un-cleared state.
+- [ ] Dispatching `"start"` sends a valid JSON command and handles its response.
+- [ ] Dispatching `"split"` sends one command frame and handles a possible event followed by its response.
+- [ ] Reset offers Save, Discard, and Cancel; Cancel sends no command.
+- [ ] Current segment lookup uses `getCurrentState` and `getSegmentName`; game/category are not assumed to be available.
 - [ ] Closing the browser tab disconnects cleanly without crashing GotoSplitter or deadlocking the server.
 - [ ] Reconnecting LiveSplit One restores action dispatching immediately.
 - [ ] Automated tests in `@qa-agent` pass using mock LiveSplit client.

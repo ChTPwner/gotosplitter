@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 )
 
 // MemoryReader defines the standard interface for reading SNES memory
@@ -30,6 +31,13 @@ func Evaluate(cond *Condition, reader MemoryReader) (bool, error) {
 	if len(data) < size {
 		return false, fmt.Errorf("insufficient data from read at 0x%X: got %d bytes, need %d", cond.ParsedAddress, len(data), size)
 	}
+
+	returnedValue := uint64(data[0])
+	if size == 2 {
+		returnedValue = uint64(binary.LittleEndian.Uint16(data))
+	}
+	log.Printf("monitoring address 0x%X (normalized to 0x%X, size=%d, type=%s): expected=0x%X returned=0x%X (bytes=% X)",
+		cond.ParsedAddress, normalizedAddr, size, cond.Type, cond.ParsedValue, returnedValue, data[:size])
 
 	var matched bool
 	switch cond.Type {

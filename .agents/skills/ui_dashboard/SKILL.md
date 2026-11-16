@@ -54,8 +54,8 @@ graph TD
      - `Connected (ws://localhost:16834)` (Green)
 
 2. **Active Game & Split Monitor**:
-   - Display currently active Game Name and Category.
-   - Display current split target name being tracked by the event engine.
+   - Display the selected game-definition name and current split target name.
+   - Do not assume LiveSplit One supplies game or category metadata; its official WebSocket protocol exposes timer state and segment names only.
    - Show trigger feedback / split counter.
 
 3. **Definition & Events File Pickers**:
@@ -84,6 +84,11 @@ graph TD
 7. **Startup Definition Errors**:
    - If no viable game definition can be resolved and parsed from configuration, show the error in a visible startup window and print it to the terminal.
    - Exit with a failure status after the error is acknowledged or the UI closes.
+
+8. **Reset Confirmation**:
+   - When the user requests a timer reset, show a modal with Save attempt & reset, Discard attempt, and Cancel.
+   - Cancel sends no reset command and leaves coordinator tracking unchanged.
+   - Keep the UI responsive while the coordinator sends the command and waits for its protocol response.
 
 ---
 

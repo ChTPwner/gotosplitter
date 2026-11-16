@@ -5,8 +5,11 @@
 | Area | Test Case | Expected Behavior |
 | :--- | :--- | :--- |
 | **LiveSplit WS** | Handshake & Connect | Client connects, server registers client |
-| **LiveSplit WS** | Action Dispatch | `"split"` sent as text frame |
-| **LiveSplit WS** | Immediate Action Clearing | Immediate `""` frame sent after action |
+| **LiveSplit WS** | Action Dispatch | JSON command frame uses protocol discriminator, e.g. `{"command":"split"}` |
+| **LiveSplit WS** | Response/Event Handling | Event frame does not consume the command response; success and error envelopes are handled |
+| **LiveSplit WS** | Reset Choice | Save/Discard sends explicit `saveAttempt`; Cancel sends no command |
+| **LiveSplit WS** | Current Segment Query | State and current segment are obtained through `getCurrentState` and `getSegmentName` |
+| **LiveSplit WS** | Metadata Limits | Game/category are not assumed to be available from the protocol |
 | **LiveSplit WS** | Disconnect Recovery | Server unregisters, doesn't panic on next split |
 | **SNI Client** | DeviceList Discovery | Finds simulated devices `["RetroArch"]` |
 | **SNI Client** | Attach to Target | Attach succeeds without error |

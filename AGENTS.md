@@ -12,10 +12,10 @@
 **GotoSplitter** is a lightweight, cross-platform autosplitter written in Go. It acts as an intelligent intermediary bridge between a **QUsb2Snes / SNI** compatible device (real Super Nintendo hardware via SD2SNES / FXPAK Pro, or compatible emulators like RetroArch / Snes9x) and **LiveSplit One**.
 
 ### Core Operational Principles
-1. **LiveSplit One WebSocket Server**: GotoSplitter hosts a WebSocket server that the LiveSplit One web/desktop client connects to as a client. GotoSplitter dispatches timer actions (`start`, `split`, `reset`, etc.) to LiveSplit One and immediately resets to an empty or no-op action once consumed to prevent repeated triggers.
+1. **LiveSplit One WebSocket Server**: GotoSplitter hosts a WebSocket server that the LiveSplit One web/desktop client connects to as a client. GotoSplitter sends `livesplit-core` JSON command frames and handles JSON success, error, and timer-event frames. Commands are requests, not persistent action state; never send an empty clearing frame.
 2. **SNI / QUsb2Snes Client**: GotoSplitter connects by default to `ws://127.0.0.1:23074` (configurable via `GOTOSPLITTER_SNI_ADDRESS` or `$HOME/.config/gotosplitter/config.json`), enumerates devices (`DeviceList`), attaches to the active SNES hardware or emulator (`Attach`), and reads RAM (`GetAddress`).
 3. **Definition-Driven Event Matching**: Compatible with the [ChTPwner/Usb2Snes-Livesplit-Definitions](https://github.com/ChTPwner/Usb2Snes-Livesplit-Definitions) specification. GotoSplitter identifies the game and current split, matches it against definition rules (such as `eq`, `bit`, `weq`, `more`, `next`), and reads memory.
-4. **Optimized Ordered Polling**: To minimize overhead and eliminate unnecessary calls over the SNI socket, GotoSplitter monitors **only the memory address of the current active event**. If split names cannot be read dynamically from LiveSplit One, an ordered events file (`events.json`) mapped by game/category is used.
+4. **Optimized Ordered Polling**: To minimize overhead and eliminate unnecessary calls over the SNI socket, GotoSplitter monitors **only the memory address of the current active event**. If split names cannot be read dynamically from LiveSplit One, use a user-selected ordered events file; game/category metadata is not discovered through the LiveSplit One protocol.
 5. **User Interface & State Persistence**: A clear, responsive UI displays real-time connection statuses (SNI & LiveSplit One), allows manual selection of definition and event files when auto-detection is not possible, and saves user preferences across restarts.
 
 ---
@@ -75,15 +75,13 @@ graph TD
 - **Responsibilities:**
   - Listen on a configurable port (default `ws://localhost:16834` or configured in settings).
   - Track client connection lifecycle (Connected / Disconnected) and notify `@coordinator` / `@ui-agent`.
-  - Send autosplitter actions (`start`, `split`, `reset`, `pause`, `resume`) to the client.
-  - **Immediate Action Clearing:** As soon as the client receives or acknowledges an action, reset the active action state to empty string `""` or a no-op indicator so that duplicate triggers do not occur.
-  - **Metadata Queries:** When supported by the client protocol, query the active run metadata:
-    - Game Name (used to auto-select definition files).
-    - Category Name (used to auto-select ordered events).
-    - Current Split Name (used to identify active memory trigger).
+  - Send autosplitter actions as JSON commands and handle their success/error responses.
+  - Serialize requests per client; ignore event-only frames when waiting for a command response because a timer event may precede the response.
+  - Query the current state with `getCurrentState` and the current segment with `getSegmentName`.
+  - Keep game-definition selection explicit: the official protocol does not expose game or category metadata.
 - **Rules & Constraints:**
   - Handle client disconnects cleanly without crashing the polling loop.
-  - Support both binary and text WebSocket frame types according to LiveSplit One specs.
+  - Send text frames containing protocol JSON; classify response, error, and event envelopes instead of interpreting them as metadata.
 
 ### 3.3 `@sni-agent` (QUsb2Snes / SNI Bridge Specialist)
 - **Mission:** Manage the low-level connection, device management, and memory reading from QUsb2Snes / SNI servers.
@@ -120,7 +118,7 @@ graph TD
 - **Responsibilities:**
   - Render a lightweight window (e.g. using Fyne or an embedded lightweight local web dashboard):
     - **Status Panel:** Live indicator of QUsb2Snes/SNI status (Disconnected, Connecting, Attached to `<Device>`) and LiveSplit One client status (Waiting, Connected).
-    - **Current Game & Split:** Display current detected game, active category, and split name being tracked.
+    - **Current Game & Split:** Display the selected game definition and split name being tracked. Do not imply that game/category metadata comes from LiveSplit One.
     - **Definition File Picker:** Dropdown listing files from `definitions/`, with manual override.
     - **Events File Picker:** Dropdown listing files from `events/`, with manual override.
   - **Settings Persistence:**
@@ -133,12 +131,12 @@ graph TD
 - **Mission:** Ensure reliability, zero memory leaks, and protocol adherence without requiring physical hardware.
 - **Responsibilities:**
   - Build a mock QUsb2Snes WebSocket server that can emulate memory responses for test games (e.g., Super Mario World, Zelda ALttP, Super Metroid).
-  - Build a mock LiveSplit One WebSocket client that connects, reads actions, requests split updates, and verifies no-op transitions.
+  - Build a mock LiveSplit One WebSocket client that connects, validates JSON commands, returns protocol responses/events, and exercises current-state and segment-name queries.
   - Unit test definition parsers against all sample JSON schemas in `ChTPwner/Usb2Snes-Livesplit-Definitions`.
   - Validate edge cases: rapid split transitions, dropped connections, emulator pause, and corrupted definition files.
 - **Current Implementation Status:** 
   - ✅ Mock QUsb2Snes server with support for DeviceList, Attach, and GetAddress opcodes
-  - ✅ Mock LiveSplit One client with message recording and immediate clearing verification
+  - ✅ Mock LiveSplit One client with message recording and protocol response simulation
   - ✅ Basic test suite with compilation and execution
   - ✅ Definition parser test placeholders
 
@@ -149,18 +147,10 @@ graph TD
 ### 4.1 LiveSplit One WebSocket Protocol Specification
 - **Role:** GotoSplitter is the **Server**; LiveSplit One is the **Client**.
 - **Default Port:** `16834` (configurable, e.g. `ws://localhost:16834`).
-- **Timer Action Messages:**
-  - Standard commands: `"start"`, `"split"`, `"reset"`, `"pause"`, `"resume"`, `"undo"`, `"skip"`.
-- **State Clearing Guarantee:**
-  ```go
-  // When an event triggers:
-  server.BroadcastAction("split")
-  
-  // Immediately or after client consumption:
-  server.BroadcastAction("") // Reset to no-op
-  ```
-- **Metadata Retrieval:** If LiveSplit One provides split names or queries, the server captures messages such as:
-  - `getCurrentSplitName` / `getGameName` / `getCategoryName` or parses JSON payload packets according to `livesplit-core` WebSocket specifications.
+- **Command frames:** Text frames must contain JSON command objects. The pinned `livesplit-core` serde schema uses lower-camel-case discriminators such as `{"command":"start"}`, `{"command":"split"}`, and `{"command":"getCurrentState"}`. Bare action strings and empty clearing frames are invalid commands.
+- **Responses and events:** Successful commands return `{"success": ...}`; failures return `{"error": ...}`. Timer events use `{"event": ...}` and may be sent before the command response. Do not treat an event frame as the response.
+- **Reset:** Send `{"command":"reset","saveAttempt":true|false}` only after the user chooses whether to save the attempt. Cancel sends no command.
+- **Metadata:** `getCurrentState` returns the timer phase and current split index; `getSegmentName` returns a segment name. The official protocol does not provide game or category metadata, so those must not be inferred or claimed as dynamically available.
 
 ### 4.2 QUsb2Snes / SNI Protocol Specification
 - **Role:** GotoSplitter is the **Client**; QUsb2Snes / SNI is the **Server**.

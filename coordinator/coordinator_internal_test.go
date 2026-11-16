@@ -9,6 +9,7 @@ import (
 
 	"goto_splitter/config"
 	"goto_splitter/engine"
+	"goto_splitter/livesplit"
 )
 
 type staticMemoryReader struct{ data []byte }
@@ -148,6 +149,7 @@ func TestResetRunStateClearsTracking(t *testing.T) {
 			Type:    engine.TypeEq,
 		}},
 	}
+
 	if err := engine.ParseAndNormalizeCondition(cond); err != nil {
 		t.Fatalf("parse condition: %v", err)
 	}
@@ -171,5 +173,29 @@ func TestResetRunStateClearsTracking(t *testing.T) {
 	}
 	if c.trackers.Step() != 0 {
 		t.Fatalf("tracker step = %d, want 0", c.trackers.Step())
+	}
+}
+
+func TestResetTimerFailurePreservesTrackingState(t *testing.T) {
+	server := livesplit.NewServer("127.0.0.1:0", nil)
+	if err := server.Start(); err != nil {
+		t.Fatalf("start LiveSplit server: %v", err)
+	}
+	defer server.Stop()
+
+	c := &Coordinator{
+		server:             server,
+		trackers:           engine.NewNextTracker(),
+		runStarted:         true,
+		splitIndex:         3,
+		currentSplitName:   "Landing Site",
+		unmatchedSplitName: "unknown split",
+	}
+	if err := c.ResetTimer(true); err == nil {
+		t.Fatal("expected reset to fail without a connected LiveSplit client")
+	}
+	if !c.runStarted || c.splitIndex != 3 || c.currentSplitName != "Landing Site" || c.unmatchedSplitName != "unknown split" {
+		t.Fatalf("tracking state changed after failed reset: started=%t index=%d split=%q unmatched=%q",
+			c.runStarted, c.splitIndex, c.currentSplitName, c.unmatchedSplitName)
 	}
 }

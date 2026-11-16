@@ -15,6 +15,15 @@ import (
 )
 
 type DefinitionSelectionHandler func(folder, filename string) error
+type ResetHandler func(saveAttempt bool) error
+
+type resetChoice uint8
+
+const (
+	resetSaveAttempt resetChoice = iota
+	resetDiscardAttempt
+	resetCancel
+)
 
 func ShowStartupError(ctx context.Context, startupErr error) error {
 	if startupErr == nil {
@@ -44,7 +53,7 @@ func ShowStartupError(ctx context.Context, startupErr error) error {
 	return nil
 }
 
-func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange DefinitionSelectionHandler) error {
+func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange DefinitionSelectionHandler, onReset ResetHandler) error {
 	if cfg == nil {
 		return fmt.Errorf("configuration is required")
 	}
@@ -166,12 +175,44 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 		onFolderSelected(folderEntry.Text)
 	})
 
+	resetButton := widget.NewButton("Reset timer", func() {
+		if onReset == nil {
+			dialog.ShowError(fmt.Errorf("reset handler is unavailable"), w)
+			return
+		}
+
+		var resetDialog *dialog.CustomDialog
+		resetDialog = dialog.NewCustomWithoutButtons(
+			"Reset timer",
+			widget.NewLabel("Save this attempt to history before resetting?"),
+			w,
+		)
+		resetDialog.SetButtons(resetChoiceButtons(func(choice resetChoice) {
+			resetDialog.Hide()
+			if choice == resetCancel {
+				return
+			}
+			go func() {
+				if err := applyResetChoice(choice, onReset); err != nil {
+					fyne.Do(func() {
+						dialog.ShowError(err, w)
+					})
+				}
+			}()
+		}))
+		resetDialog.Show()
+	})
+	if onReset == nil {
+		resetButton.Disable()
+	}
+
 	w.SetContent(container.NewVBox(
 		widget.NewLabel("Game definition folder"),
 		container.NewBorder(nil, nil, nil, browseButton, folderEntry),
 		applyFolderButton,
 		widget.NewLabel("Current game definition"),
 		definitionSelect,
+		resetButton,
 		status,
 	))
 	w.Resize(fyne.NewSize(640, 220))
@@ -190,4 +231,26 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 	}()
 	w.ShowAndRun()
 	return nil
+}
+
+func resetChoiceButtons(onChoice func(resetChoice)) []fyne.CanvasObject {
+	return []fyne.CanvasObject{
+		widget.NewButton("Save attempt & reset", func() { onChoice(resetSaveAttempt) }),
+		widget.NewButton("Discard attempt", func() { onChoice(resetDiscardAttempt) }),
+		widget.NewButton("Cancel", func() { onChoice(resetCancel) }),
+	}
+}
+
+func applyResetChoice(choice resetChoice, onReset ResetHandler) error {
+	switch choice {
+	case resetCancel:
+		return nil
+	case resetSaveAttempt, resetDiscardAttempt:
+		if onReset == nil {
+			return fmt.Errorf("reset handler is unavailable")
+		}
+		return onReset(choice == resetSaveAttempt)
+	default:
+		return fmt.Errorf("invalid reset choice %d", choice)
+	}
 }

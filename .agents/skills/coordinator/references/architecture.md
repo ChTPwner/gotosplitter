@@ -33,7 +33,8 @@ type MemoryReader interface {
 
 // ActionDispatcher broadcasts speedrun timer actions.
 type ActionDispatcher interface {
-    DispatchAction(action string)
+    DispatchAction(action string) error
+    ResetAttempt(saveAttempt bool) error
     IsClientConnected() bool
 }
 
@@ -57,3 +58,9 @@ type SplitEngine interface {
    - Disconnect SNI WebSocket.
    - Persist application configuration to disk.
 3. **Data Races**: Always build and test with `go test -race ./...`. No shared state may be written without write lock or atomic primitives.
+
+## 4. LiveSplit One protocol boundary
+
+- The coordinator sends internal action names; `livesplit.Server` encodes them as JSON commands and reports protocol errors.
+- Current split tracking uses `getCurrentState` followed by `getSegmentName`. Game/category metadata is not available from the official protocol.
+- A reset requires a user choice: Save sends `saveAttempt: true`, Discard sends `false`, and Cancel sends no command and leaves tracking unchanged.

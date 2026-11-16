@@ -50,52 +50,49 @@ func TestMockServersInitialization(t *testing.T) {
 		t.Fatal("Expected SNI client to report connected")
 	}
 
-	// 5. Dispatch action and verify immediate clearing
-	lsServer.DispatchAction("start")
-
-	if err := lsMock.WaitForAction("starttimer", 1*time.Second); err != nil {
-		t.Fatalf("LiveSplit client did not receive start action: %v", err)
+	// 5. Dispatch a protocol command and wait for its response.
+	if err := lsServer.DispatchAction("start"); err != nil {
+		t.Fatalf("dispatch start: %v", err)
 	}
-
-	if err := lsMock.VerifyImmediateClearing(); err != nil {
-		t.Fatalf("Immediate clearing verification failed: %v", err)
+	if err := lsMock.WaitForAction("start", 1*time.Second); err != nil {
+		t.Fatalf("LiveSplit client did not receive start action: %v", err)
 	}
 }
 
-func TestLiveSplitMetadataAndQueries(t *testing.T) {
-	metadataUpdates := make(chan livesplit.RunMetadata, 1)
+func TestLiveSplitProtocolCommandsAndState(t *testing.T) {
+	splitUpdates := make(chan livesplit.SplitStatus, 1)
 	lsServer := livesplit.NewServer("127.0.0.1:0", nil)
-	lsServer.SetMetadataCallback(func(metadata livesplit.RunMetadata) {
-		metadataUpdates <- metadata
+	lsServer.SetSplitCallback(func(status livesplit.SplitStatus) {
+		splitUpdates <- status
 	})
 	if err := lsServer.Start(); err != nil {
-		t.Fatalf("Failed to start LiveSplit server: %v", err)
+		t.Fatalf("failed to start LiveSplit server: %v", err)
 	}
 	defer lsServer.Stop()
 
 	lsMock := NewMockLiveSplit("")
 	if err := lsMock.Connect(lsServer.URL()); err != nil {
-		t.Fatalf("Failed to connect mock LiveSplit client: %v", err)
+		t.Fatalf("failed to connect mock LiveSplit client: %v", err)
 	}
 	defer lsMock.Stop()
 
-	if err := lsMock.SendGameInfo("Super Metroid", "Any%"); err != nil {
-		t.Fatalf("Failed to send run metadata: %v", err)
+	lsMock.SetCurrentSplitName("Landing Site")
+	if err := lsServer.DispatchAction("start"); err != nil {
+		t.Fatalf("dispatch start command: %v", err)
+	}
+	if err := lsMock.WaitForAction("start", time.Second); err != nil {
+		t.Fatalf("start command was not handled: %v", err)
+	}
+	if err := lsServer.RequestCurrentSplitName(); err != nil {
+		t.Fatalf("request current split: %v", err)
 	}
 	select {
-	case metadata := <-metadataUpdates:
-		if metadata.GameName != "Super Metroid" || metadata.CategoryName != "Any%" {
-			t.Fatalf("Unexpected metadata: %+v", metadata)
+	case status := <-splitUpdates:
+		if !status.Running || status.CurrentSplitName != "Landing Site" {
+			t.Fatalf("unexpected split status: %+v", status)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("Timed out waiting for run metadata")
-	}
-
-	if err := lsMock.SendQuery("getGameName"); err != nil {
-		t.Fatalf("Failed to query game name: %v", err)
-	}
-	if err := lsMock.WaitForAction("Super Metroid", time.Second); err != nil {
-		t.Fatalf("LiveSplit server did not reply with the game name: %v", err)
+		t.Fatal("timed out waiting for protocol state")
 	}
 }
 
@@ -164,10 +161,11 @@ func TestSuperMetroidFullIntegrationWithMocks(t *testing.T) {
 	}
 
 	// Dispatch Start to LiveSplit One
-	lsServer.DispatchAction("start")
-
-	if err := lsMock.WaitForAction("starttimer", 1*time.Second); err != nil {
-		t.Fatalf("Timed out waiting for 'starttimer' action: %v", err)
+	if err := lsServer.DispatchAction("start"); err != nil {
+		t.Fatalf("dispatch start command: %v", err)
+	}
+	if err := lsMock.WaitForAction("start", 1*time.Second); err != nil {
+		t.Fatalf("timed out waiting for start command: %v", err)
 	}
 
 	// 7. Test Split 1: Landing Site (0x079B == 0x91F8, weq)
@@ -190,7 +188,9 @@ func TestSuperMetroidFullIntegrationWithMocks(t *testing.T) {
 	}
 
 	// Dispatch Split to LiveSplit One
-	lsServer.DispatchAction("split")
+	if err := lsServer.DispatchAction("split"); err != nil {
+		t.Fatalf("dispatch first split: %v", err)
+	}
 	if err := lsMock.WaitForAction("split", 1*time.Second); err != nil {
 		t.Fatalf("Timed out waiting for Landing Site 'split': %v", err)
 	}
@@ -207,7 +207,9 @@ func TestSuperMetroidFullIntegrationWithMocks(t *testing.T) {
 		t.Fatalf("Gauntlet Entrance failed to match: %v", err)
 	}
 
-	lsServer.DispatchAction("split")
+	if err := lsServer.DispatchAction("split"); err != nil {
+		t.Fatalf("dispatch second split: %v", err)
+	}
 
 	// 9. Test Split 3: Entering Lower Norfair Elevator (0x079B == 0xAF3F AND 0x0E18 == 0x01)
 	norfair := findDefByName(def.Definitions, "Entering Lower Norfair Elevator")
@@ -230,23 +232,19 @@ func TestSuperMetroidFullIntegrationWithMocks(t *testing.T) {
 		t.Fatalf("Entering Lower Norfair Elevator failed to match: %v", err)
 	}
 
-	lsServer.DispatchAction("split")
-
-	// 10. Verify Immediate Clearing across the entire sequence
-	time.Sleep(100 * time.Millisecond)
-	if err := lsMock.VerifyImmediateClearing(); err != nil {
-		t.Fatalf("Immediate action clearing failed: %v", err)
+	if err := lsServer.DispatchAction("split"); err != nil {
+		t.Fatalf("dispatch third split: %v", err)
 	}
 
 	msgs := lsMock.GetMessages()
-	expectedSequence := []string{"starttimer", "", "split", "", "split", "", "split", ""}
+	expectedSequence := []string{"start", "split", "split", "split"}
 	if len(msgs) != len(expectedSequence) {
-		t.Fatalf("Expected %d total messages, got %d: %v", len(expectedSequence), len(msgs), msgs)
+		t.Fatalf("expected %d total actions, got %d: %v", len(expectedSequence), len(msgs), msgs)
 	}
 
 	for i, expected := range expectedSequence {
 		if msgs[i] != expected {
-			t.Errorf("Message index %d: expected %q, got %q", i, expected, msgs[i])
+			t.Errorf("action index %d: expected %q, got %q", i, expected, msgs[i])
 		}
 	}
 }

@@ -32,7 +32,7 @@ graph TD
 
     subgraph Verification Checks
         CheckAction["Verify Split Actions Received"]
-        CheckClearing["Verify Immediate Action Clearing"]
+        CheckProtocol["Verify JSON Commands & Responses"]
         CheckLeak["Verify Zero Leaks & Low CPU"]
         CheckSchema["Validate Real Game Definitions"]
     end
@@ -41,7 +41,7 @@ graph TD
     MockLS --"Connects as Client"--> GotoSplitter
 
     GotoSplitter --> CheckAction
-    GotoSplitter --> CheckClearing
+    GotoSplitter --> CheckProtocol
     GotoSplitter --> CheckLeak
     GotoSplitter --> CheckSchema
 ```
@@ -58,8 +58,10 @@ graph TD
 
 2. **Mock LiveSplit One Client**:
    - WebSocket client that connects to GotoSplitter (`ws://localhost:16834`).
-   - Records all received frames.
-   - **Verifies Immediate Clearing**: Asserts that every non-empty action (e.g. `"split"`) is immediately followed by an empty frame `""` or reset state.
+   - Parses each incoming text frame as a `livesplit-core` JSON command.
+   - Returns `success`, `error`, and timer `event` envelopes; include event-before-response sequences in tests.
+   - Records timer actions and supports `getCurrentState` / `getSegmentName`.
+   - Verify `reset.saveAttempt` for both Save and Discard; Cancel must send no command.
 
 3. **Definition Schema Verification**:
    - Unit test definition parsers against all sample JSON schemas from `ChTPwner/Usb2Snes-Livesplit-Definitions`.
@@ -92,9 +94,10 @@ See mock implementation code in [examples/mocks.go](./examples/mocks.go).
    ```bash
    go test -v -race -timeout 30s ./test/...
    ```
-3. **Verify Immediate Clearing Assertion**:
-   - In `test/mock_livesplit.go`, maintain a FIFO queue of received messages.
-   - When a `"split"` action is received, assert that the very next message is `""`.
+3. **Verify the Server Protocol**:
+   - In `test/mock_livesplit.go`, reject bare action strings and unknown commands.
+   - Assert that each action is sent once as a JSON command and that the server handles its response.
+   - Ensure event-only frames do not satisfy a pending command request.
 4. **Simulate Connection Drop & Recovery**:
    - Start GotoSplitter with mock SNI server.
    - Stop mock SNI server, wait 1 second, restart mock SNI server.
@@ -106,6 +109,7 @@ See mock implementation code in [examples/mocks.go](./examples/mocks.go).
 
 - [ ] All unit and integration tests pass: `go test -race ./...`.
 - [ ] Mock SNI server faithfully simulates `DeviceList`, `Attach`, and `GetAddress`.
-- [ ] Mock LiveSplit client verifies the immediate action clearing requirement.
+- [ ] Mock LiveSplit client validates JSON commands and returns protocol response/event envelopes.
+- [ ] Save and Discard reset choices send explicit `saveAttempt` values; Cancel sends no reset.
 - [ ] No race conditions detected during multi-threaded polling tests.
 - [ ] Memory footprint remains flat over extended test runs (no memory leaks).
