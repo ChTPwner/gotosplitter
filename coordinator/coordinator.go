@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -114,32 +112,92 @@ func (c *Coordinator) Stop() error {
 }
 
 func (c *Coordinator) loadDefinition() error {
-	path := c.cfg.GameDefinition
-	if path == "" {
-		candidates := []string{
-			filepath.Join("config", "definitions", "super_metroid.json"),
-			filepath.Join("definitions", "super_metroid.json"),
-			filepath.Join(".", "config", "definitions", "super_metroid.json"),
-			filepath.Join(".", "definitions", "super_metroid.json"),
+	folder := c.cfg.GameDefinitionFolder
+	if folder == "" {
+		defaultFolder, err := config.DefaultGameDefinitionFolder()
+		if err != nil {
+			return err
 		}
-		for _, candidate := range candidates {
-			if _, err := os.Stat(candidate); err == nil {
-				path = candidate
-				break
-			}
-		}
+		folder = defaultFolder
 	}
-	if path == "" {
-		return fmt.Errorf("no definition configured")
+	if c.cfg.CurrentGameDefinition == "" {
+		names, err := config.ListGameDefinitions(folder)
+		if err != nil {
+			return fmt.Errorf("list game definitions: %w", err)
+		}
+		if len(names) == 0 {
+			return fmt.Errorf("no viable game definition: no JSON definition files found in %s", folder)
+		}
 	}
 
+	path, filename, err := config.ResolveGameDefinition(folder, c.cfg.CurrentGameDefinition)
+	if err != nil {
+		return fmt.Errorf("resolve game definition: %w", err)
+	}
 	def, err := engine.LoadDefinition(path)
 	if err != nil {
 		return fmt.Errorf("definition file %s: %w", path, err)
 	}
 
+	selectionChanged := c.cfg.GameDefinitionFolder != folder || c.cfg.CurrentGameDefinition != filename
 	c.mu.Lock()
 	c.definition = def
+	c.cfg.GameDefinitionFolder = folder
+	c.cfg.CurrentGameDefinition = filename
+	c.mu.Unlock()
+	if selectionChanged {
+		if err := config.Save(c.cfg); err != nil {
+			return fmt.Errorf("save selected game definition: %w", err)
+		}
+	}
+	return nil
+}
+
+// SetGameDefinition updates the active definition and persists the selection.
+// An empty filename clears the active definition while retaining the folder.
+func (c *Coordinator) SetGameDefinition(folder, filename string) error {
+	if folder == "" {
+		defaultFolder, err := config.DefaultGameDefinitionFolder()
+		if err != nil {
+			return err
+		}
+		folder = defaultFolder
+	}
+
+	var def *engine.GameDefinition
+	if filename != "" {
+		path, selected, err := config.ResolveGameDefinition(folder, filename)
+		if err != nil {
+			return fmt.Errorf("resolve game definition: %w", err)
+		}
+		def, err = engine.LoadDefinition(path)
+		if err != nil {
+			return fmt.Errorf("definition file %s: %w", path, err)
+		}
+		filename = selected
+	}
+
+	if c.cfg == nil {
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("load configuration: %w", err)
+		}
+		c.cfg = cfg
+	}
+	nextConfig := *c.cfg
+	nextConfig.GameDefinitionFolder = folder
+	nextConfig.CurrentGameDefinition = filename
+	if err := config.Save(&nextConfig); err != nil {
+		return fmt.Errorf("save game definition selection: %w", err)
+	}
+
+	c.mu.Lock()
+	c.cfg.GameDefinitionFolder = folder
+	c.cfg.CurrentGameDefinition = filename
+	c.definition = def
+	c.runStarted = false
+	c.splitIndex = 0
+	c.trackers.Reset()
 	c.mu.Unlock()
 	return nil
 }

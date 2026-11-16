@@ -78,6 +78,8 @@ graph TD
 | `chan engine.TrackingState` | Event Engine | UI | Active game, category, and target split name |
 | `chan config.Config` | UI | Coordinator | Runtime config updates (files, addresses) |
 
+Game-definition configuration uses `GameDefinitionFolder` and `CurrentGameDefinition`. The folder defaults to the directory containing `config.json`; the current value is a filename in that folder. If it is empty, select the first alphabetically sorted `.json` file. Startup must fail if there is no viable definition, reporting the error in the UI and terminal. Applying a UI selection loads it and resets run tracking.
+
 ---
 
 ## 4. Step-by-Step Implementation Runbook

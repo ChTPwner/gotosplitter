@@ -23,7 +23,7 @@ This skill defines the technical standards, condition evaluation logic, sequenti
 ```mermaid
 graph TD
     subgraph Input Sources
-        DefFile["definitions/*.json (Definitions)"]
+        DefFile["game_definition_folder/*.json (Definitions)"]
         EventFile["events/*.json (Ordered Fallback)"]
         LSMeta["LiveSplit One Metadata (Active Split)"]
     end
@@ -51,7 +51,13 @@ graph TD
    - Parse root fields: `name`, `autostart`, `definitions`, `alias`, `igt`.
    - Parse condition rule objects: `name`, `address`, `value`, `type`, `more`, `next`.
 
-2. **Active Split Tracking Strategies**:
+2. **Select the Active Game Definition**:
+   - Read `game_definition_folder` and `current_game_definition` from application config.
+   - The folder defaults to `$HOME/.config/gotosplitter/`; the selected value is a filename within that folder.
+   - If the filename is empty, use the first `.json` filename alphabetically (non-recursively). Startup must fail if no viable definition can be resolved or parsed.
+   - Report startup definition errors in both the UI and terminal, then exit with a failure status.
+
+3. **Active Split Tracking Strategies**:
    - **Path A (Dynamic Split Name Matching)**:
      - When LiveSplit One provides the active split name (e.g. `"Yoshi's Island 1"`), look up the rule by name in the loaded game definition.
    - **Path B (Ordered Fallback Sequence via `events.json`)**:
@@ -59,19 +65,19 @@ graph TD
      - Maintain an index pointer pointing to the current step in `ordered_events`.
      - Advance the pointer sequentially upon each successful trigger.
 
-3. **Optimized Single-Address Polling Invariant**:
+4. **Optimized Single-Address Polling Invariant**:
    > [!IMPORTANT]
    > Do NOT poll every condition in the game definition simultaneously. Doing so causes hundreds of unnecessary WebSocket requests and saturates the SNI memory bus.
    > **Implementation Rule:** At any given tick, GotoSplitter monitors **only the memory address of the current active event** (plus concurrent sub-conditions in `more` if applicable).
 
-4. **Condition Evaluation Engine**:
+5. **Condition Evaluation Engine**:
    - **`eq` (Byte Equals)**: Evaluates whether `memory[address] == expected_value`.
    - **`weq` (Word Equals)**: 16-bit little-endian comparison: `memory[address] | (memory[address+1] << 8) == expected_value`.
    - **`bit` (Bitmask Test)**: Evaluates whether `(memory[address] & expected_value) != 0`.
    - **`more` (Concurrent Conditions)**: Array of additional conditions that must ALL evaluate to true at the same tick.
    - **`next` (Sequential Multi-Step Conditions)**: Array of condition steps that must occur in chronological order before the split triggers.
 
-5. **Address Normalization**:
+6. **Address Normalization**:
    - Handles hex strings (`"0x7E0100"`, `"0xF50010"`, `"0xA0"`) and numeric values.
    - Normalizes addresses to `uint32` using WRAM / SNES memory mapping standards.
 
@@ -91,7 +97,9 @@ See reference evaluation code in [examples/evaluator.go](./examples/evaluator.go
 
 ## 4. Step-by-Step Implementation Runbook
 
-1. **Load & Normalize Definition**:
+1. **Resolve, Load & Normalize Definition**:
+   - Resolve the configured filename within `game_definition_folder`; when empty, choose the first alphabetically sorted JSON filename.
+   - Stop startup with an error if no JSON file is available or the selected definition cannot be loaded and parsed.
    - Unmarshal JSON into typed `GameDefinition` struct.
    - Parse all address strings into `uint32` values.
    - Parse all value strings/hex into `uint64` values.
@@ -124,6 +132,7 @@ See reference evaluation code in [examples/evaluator.go](./examples/evaluator.go
 
 ## 5. Verification & Validation Checklist
 
+- [ ] Startup fails when no viable configured definition exists and reports the error in the UI and terminal.
 - [ ] JSON definitions from `ChTPwner/Usb2Snes-Livesplit-Definitions` parse without errors.
 - [ ] Bitwise tests (`bit`) correctly identify bitmask flags.
 - [ ] 16-bit word comparisons (`weq`) correctly match little-endian values.

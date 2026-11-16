@@ -177,7 +177,20 @@ func (s *Server) SetMetadataCallback(callback func(RunMetadata)) {
 }
 
 // BroadcastAction dispatches an action to all connected clients and immediately clears it.
+func normalizeAction(action string) string {
+	action = strings.TrimSpace(action)
+	switch strings.ToLower(action) {
+	case "start":
+		return "starttimer"
+	case "split":
+		return "split"
+	default:
+		return action
+	}
+}
+
 func (s *Server) BroadcastAction(action string) {
+	action = normalizeAction(action)
 	if action == "" {
 		return
 	}

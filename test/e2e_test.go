@@ -53,7 +53,7 @@ func TestMockServersInitialization(t *testing.T) {
 	// 5. Dispatch action and verify immediate clearing
 	lsServer.DispatchAction("start")
 
-	if err := lsMock.WaitForAction("start", 1*time.Second); err != nil {
+	if err := lsMock.WaitForAction("starttimer", 1*time.Second); err != nil {
 		t.Fatalf("LiveSplit client did not receive start action: %v", err)
 	}
 
@@ -166,8 +166,8 @@ func TestSuperMetroidFullIntegrationWithMocks(t *testing.T) {
 	// Dispatch Start to LiveSplit One
 	lsServer.DispatchAction("start")
 
-	if err := lsMock.WaitForAction("start", 1*time.Second); err != nil {
-		t.Fatalf("Timed out waiting for 'start' action: %v", err)
+	if err := lsMock.WaitForAction("starttimer", 1*time.Second); err != nil {
+		t.Fatalf("Timed out waiting for 'starttimer' action: %v", err)
 	}
 
 	// 7. Test Split 1: Landing Site (0x079B == 0x91F8, weq)
@@ -239,7 +239,7 @@ func TestSuperMetroidFullIntegrationWithMocks(t *testing.T) {
 	}
 
 	msgs := lsMock.GetMessages()
-	expectedSequence := []string{"start", "", "split", "", "split", "", "split", ""}
+	expectedSequence := []string{"starttimer", "", "split", "", "split", "", "split", ""}
 	if len(msgs) != len(expectedSequence) {
 		t.Fatalf("Expected %d total messages, got %d: %v", len(expectedSequence), len(msgs), msgs)
 	}

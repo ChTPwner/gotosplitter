@@ -19,9 +19,10 @@ func TestCoordinatorStartsAutostartAndSplitSequence(t *testing.T) {
 
 	defPath := filepath.Join("..", "config", "definitions", "super_metroid.json")
 	cfg := &config.Config{
-		SNIAddress:       sniMock.URL(),
-		LiveSplitAddress: "127.0.0.1:0",
-		GameDefinition:   defPath,
+		SNIAddress:            sniMock.URL(),
+		LiveSplitAddress:      "127.0.0.1:0",
+		GameDefinitionFolder:  filepath.Dir(defPath),
+		CurrentGameDefinition: filepath.Base(defPath),
 	}
 
 	c := coordinator.NewCoordinator(cfg)
@@ -42,7 +43,7 @@ func TestCoordinatorStartsAutostartAndSplitSequence(t *testing.T) {
 	sniMock.SetByte(0x0998, 0x02)
 	sniMock.SetByte(0x0DE2, 0x0C)
 
-	if err := lsMock.WaitForAction("start", 2*time.Second); err != nil {
+	if err := lsMock.WaitForAction("starttimer", 2*time.Second); err != nil {
 		t.Fatalf("did not receive start action: %v", err)
 	}
 
