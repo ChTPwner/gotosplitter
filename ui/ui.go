@@ -1,3 +1,4 @@
+// Package ui implements the user interface for GotoSplitter, allowing users to select game definitions and reset the timer.
 package ui
 
 import (
@@ -14,8 +15,10 @@ import (
 	"goto_splitter/config"
 )
 
-type DefinitionSelectionHandler func(folder, filename string) error
-type ResetHandler func(saveAttempt bool) error
+type (
+	DefinitionSelectionHandler func(folder, filename string) error
+	ResetHandler               func(saveAttempt bool) error
+)
 
 type resetChoice uint8
 

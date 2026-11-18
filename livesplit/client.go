@@ -1,3 +1,4 @@
+// Package livesplit implements a client for the LiveSplit One WebSocket API.
 package livesplit
 
 import (

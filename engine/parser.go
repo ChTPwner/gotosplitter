@@ -1,3 +1,4 @@
+// Package engine implements the evaluation engine for LiveSplit One conditions.
 package engine
 
 import (

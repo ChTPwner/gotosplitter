@@ -1,3 +1,4 @@
+// Package coordinator implements the runtime that coordinates the LiveSplit One server, the SNI bridge, and the split evaluation engine.
 package coordinator
 
 import (

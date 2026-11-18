@@ -1,3 +1,4 @@
+// Package sni implements a client for the QUsb2Snes / SNI WebSocket bridge, allowing memory reads and event checks.
 package sni
 
 import (

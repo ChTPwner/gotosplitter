@@ -1,3 +1,4 @@
+// Package config manages the configuration file for GoToSplitter, including loading, saving, and migrating legacy configurations.
 package config
 
 import (
@@ -139,7 +140,7 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
@@ -147,7 +148,7 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write config file %s: %w", path, err)
 	}
 	return nil
