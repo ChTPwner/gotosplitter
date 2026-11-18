@@ -17,7 +17,7 @@ import (
 
 type (
 	DefinitionSelectionHandler func(folder, filename string) error
-	ResetHandler               func(saveAttempt bool) error
+	ResetHandler               func(saveAttempt, resetSNES bool) error
 )
 
 type resetChoice uint8
@@ -185,9 +185,13 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 		}
 
 		var resetDialog *dialog.CustomDialog
+		resetGameCheck := widget.NewCheck("Also reset the SNES game", nil)
 		resetDialog = dialog.NewCustomWithoutButtons(
 			"Reset timer",
-			widget.NewLabel("Save this attempt to history before resetting?"),
+			container.NewVBox(
+				widget.NewLabel("Save this attempt to history before resetting?"),
+				resetGameCheck,
+			),
 			w,
 		)
 		resetDialog.SetButtons(resetChoiceButtons(func(choice resetChoice) {
@@ -195,8 +199,9 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 			if choice == resetCancel {
 				return
 			}
+			resetSNES := resetGameCheck.Checked
 			go func() {
-				if err := applyResetChoice(choice, onReset); err != nil {
+				if err := applyResetChoice(choice, resetSNES, onReset); err != nil {
 					fyne.Do(func() {
 						dialog.ShowError(err, w)
 					})
@@ -244,7 +249,7 @@ func resetChoiceButtons(onChoice func(resetChoice)) []fyne.CanvasObject {
 	}
 }
 
-func applyResetChoice(choice resetChoice, onReset ResetHandler) error {
+func applyResetChoice(choice resetChoice, resetSNES bool, onReset ResetHandler) error {
 	switch choice {
 	case resetCancel:
 		return nil
@@ -252,7 +257,7 @@ func applyResetChoice(choice resetChoice, onReset ResetHandler) error {
 		if onReset == nil {
 			return fmt.Errorf("reset handler is unavailable")
 		}
-		return onReset(choice == resetSaveAttempt)
+		return onReset(choice == resetSaveAttempt, resetSNES)
 	default:
 		return fmt.Errorf("invalid reset choice %d", choice)
 	}

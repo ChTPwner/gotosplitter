@@ -25,12 +25,13 @@ type MockSNI struct {
 	stopChan    chan struct{}
 
 	// Emulated memory
-	wram         []byte          // 128KB WRAM buffer ($7E:0000 - $7F:FFFF)
-	extraRam     map[uint32]byte // Sparse map for non-WRAM addresses
-	devices      []string
-	attachedDev  string
-	clientName   string
-	readRequests []MemoryReadRequest
+	wram          []byte          // 128KB WRAM buffer ($7E:0000 - $7F:FFFF)
+	extraRam      map[uint32]byte // Sparse map for non-WRAM addresses
+	devices       []string
+	attachedDev   string
+	clientName    string
+	readRequests  []MemoryReadRequest
+	resetRequests int
 }
 
 type MemoryReadRequest struct {
@@ -173,6 +174,23 @@ func (m *MockSNI) GetAddressRequests() []MemoryReadRequest {
 	return append([]MemoryReadRequest(nil), m.readRequests...)
 }
 
+func (m *MockSNI) ResetRequests() int {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	return m.resetRequests
+}
+
+func (m *MockSNI) WaitForResetRequest(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if m.ResetRequests() > 0 {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for SNI reset request")
+}
+
 // ResetMemory clears all simulated memory back to zero
 func (m *MockSNI) ResetMemory() {
 	m.mutex.Lock()
@@ -267,6 +285,10 @@ func (m *MockSNI) handleConnection(w http.ResponseWriter, r *http.Request) {
 			_ = conn.WriteMessage(websocket.TextMessage, resp)
 		case "Attach":
 			m.handleAttach(request)
+		case "Reset":
+			m.mutex.Lock()
+			m.resetRequests++
+			m.mutex.Unlock()
 		case "GetAddress":
 			rawBytes, jsonFallback := m.handleGetAddress(request)
 			if rawBytes != nil {

@@ -8,19 +8,23 @@ func TestApplyResetChoice(t *testing.T) {
 		choice     resetChoice
 		wantCalled bool
 		wantSave   bool
+		resetSNES  bool
 	}{
 		{name: "save", choice: resetSaveAttempt, wantCalled: true, wantSave: true},
-		{name: "discard", choice: resetDiscardAttempt, wantCalled: true, wantSave: false},
-		{name: "cancel", choice: resetCancel, wantCalled: false},
+		{name: "discard and reset SNES", choice: resetDiscardAttempt, wantCalled: true, wantSave: false, resetSNES: true},
+		{name: "cancel", choice: resetCancel, wantCalled: false, resetSNES: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
-			err := applyResetChoice(tt.choice, func(saveAttempt bool) error {
+			err := applyResetChoice(tt.choice, tt.resetSNES, func(saveAttempt, resetSNES bool) error {
 				called = true
 				if saveAttempt != tt.wantSave {
 					t.Fatalf("saveAttempt = %t, want %t", saveAttempt, tt.wantSave)
+				}
+				if resetSNES != tt.resetSNES {
+					t.Fatalf("resetSNES = %t, want %t", resetSNES, tt.resetSNES)
 				}
 				return nil
 			})

@@ -374,6 +374,11 @@ func (c *Coordinator) dispatchAction(action string) error {
 
 // ResetTimer asks LiveSplit One to reset with an explicit attempt-history choice.
 func (c *Coordinator) ResetTimer(saveAttempt bool) error {
+	return c.ResetTimerWithOptions(saveAttempt, false)
+}
+
+// ResetTimerWithOptions resets LiveSplit and optionally asks SNI to reset the SNES.
+func (c *Coordinator) ResetTimerWithOptions(saveAttempt, resetSNES bool) error {
 	c.operationMu.Lock()
 	defer c.operationMu.Unlock()
 
@@ -385,5 +390,23 @@ func (c *Coordinator) ResetTimer(saveAttempt bool) error {
 	}
 	c.resetRunState()
 	log.Printf("Reset LiveSplit timer (save attempt=%t)", saveAttempt)
+
+	if resetSNES {
+		if c.cfg == nil || c.cfg.SNIAddress == "" {
+			return fmt.Errorf("reset SNES game: SNI address is not configured")
+		}
+		if c.sniClient == nil {
+			c.sniClient = sni.NewClient(c.cfg.SNIAddress)
+		}
+		if !c.sniClient.IsConnected() {
+			if err := c.sniClient.Connect(); err != nil {
+				return fmt.Errorf("reset SNES game: connect to SNI: %w", err)
+			}
+		}
+		if err := c.sniClient.ResetGame(); err != nil {
+			return fmt.Errorf("reset SNES game: %w", err)
+		}
+		log.Printf("Sent SNES reset request via SNI")
+	}
 	return nil
 }

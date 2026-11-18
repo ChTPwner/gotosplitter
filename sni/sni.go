@@ -155,6 +155,20 @@ func (s *SNI) ReadMemory(address uint32, length int) ([]byte, error) {
 	return data, nil
 }
 
+// ResetGame asks the attached device or emulator to reset the SNES.
+func (s *SNI) ResetGame() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.connected || s.conn == nil {
+		return fmt.Errorf("SNI client not connected")
+	}
+	if err := s.sendRequestLocked(Request{Opcode: "Reset", Space: "SNES"}); err != nil {
+		return fmt.Errorf("send SNI reset request: %w", err)
+	}
+	return nil
+}
+
 func normalizeWRAMAddress(address uint32) uint32 {
 	switch {
 	case address >= 0xF50000 && address <= 0xF6FFFF:
