@@ -99,54 +99,42 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 		status.SetText("")
 		return nil
 	}
-	refreshDefinitions := func(folder string) error {
+	refreshDefinitions := func(folder string) (string, error) {
 		names, err := config.ListGameDefinitions(folder)
 		if err != nil {
-			return err
+			return "", err
 		}
 		updatingSelection = true
 		definitionSelect.Options = names
 		definitionSelect.Refresh()
-		selected := currentDefinition
-		found := false
-		for _, name := range names {
-			if name == selected {
-				found = true
-				break
-			}
-		}
-		if !found {
-			selected = ""
-			if len(names) != 0 {
-				selected = names[0]
-			}
-		}
+		selected := chooseDefinition(names, currentDefinition)
 		definitionSelect.SetSelected(selected)
 		updatingSelection = false
-		return nil
+		return selected, nil
 	}
 	onFolderSelected := func(folder string) {
 		if folder == "" {
 			return
 		}
 		folderEntry.SetText(folder)
-		if err := refreshDefinitions(folder); err != nil {
+		selected, err := refreshDefinitions(folder)
+		if err != nil {
 			dialog.ShowError(err, w)
 			folderEntry.SetText(currentFolder)
 			return
 		}
-		if err := applySelection(folder, definitionSelect.Selected); err != nil {
+		if err := applySelection(folder, selected); err != nil {
 			dialog.ShowError(err, w)
 			status.SetText(err.Error())
 			folderEntry.SetText(currentFolder)
-			if refreshErr := refreshDefinitions(currentFolder); refreshErr != nil {
+			if _, refreshErr := refreshDefinitions(currentFolder); refreshErr != nil {
 				status.SetText(refreshErr.Error())
 			}
 			return
 		}
 	}
 
-	if err := refreshDefinitions(currentFolder); err != nil {
+	if _, err := refreshDefinitions(currentFolder); err != nil {
 		status.SetText(err.Error())
 	}
 	definitionSelect.OnChanged = func(filename string) {
@@ -244,6 +232,18 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 	}()
 	w.ShowAndRun()
 	return nil
+}
+
+func chooseDefinition(names []string, current string) string {
+	for _, name := range names {
+		if name == current {
+			return current
+		}
+	}
+	if len(names) != 0 {
+		return names[0]
+	}
+	return ""
 }
 
 func resetChoiceButtons(onChoice func(resetChoice)) []fyne.CanvasObject {

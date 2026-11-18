@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -222,6 +223,20 @@ func TestResolveGameDefinitionUsesFirstAlphabeticalJSONFile(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(folder, "nested.json"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(folder, "nested"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "nested", "Beta.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	names, err := ListGameDefinitions(folder)
+	if err != nil {
+		t.Fatalf("ListGameDefinitions() error = %v", err)
+	}
+	if want := []string{"Alpha.json", "nested/Beta.json", "zeta.json"}; !slices.Equal(names, want) {
+		t.Fatalf("ListGameDefinitions() = %v, want %v", names, want)
+	}
 
 	path, filename, err := ResolveGameDefinition(folder, "")
 	if err != nil {
@@ -233,10 +248,21 @@ func TestResolveGameDefinitionUsesFirstAlphabeticalJSONFile(t *testing.T) {
 	if path != filepath.Join(folder, "Alpha.json") {
 		t.Fatalf("path = %q, want %q", path, filepath.Join(folder, "Alpha.json"))
 	}
+
+	path, filename, err = ResolveGameDefinition(folder, "nested/Beta.json")
+	if err != nil {
+		t.Fatalf("ResolveGameDefinition() nested error = %v", err)
+	}
+	if filename != "nested/Beta.json" || path != filepath.Join(folder, "nested", "Beta.json") {
+		t.Fatalf("nested resolution = (%q, %q), want (%q, nested/Beta.json)",
+			path, filename, filepath.Join(folder, "nested", "Beta.json"))
+	}
 }
 
 func TestResolveGameDefinitionRejectsPathsOutsideFolder(t *testing.T) {
-	if _, _, err := ResolveGameDefinition(t.TempDir(), "../outside.json"); err == nil {
-		t.Fatal("ResolveGameDefinition() accepted a path instead of a filename")
+	for _, filename := range []string{"../outside.json", "/outside.json"} {
+		if _, _, err := ResolveGameDefinition(t.TempDir(), filename); err == nil {
+			t.Fatalf("ResolveGameDefinition() accepted path %q outside folder", filename)
+		}
 	}
 }

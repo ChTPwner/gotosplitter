@@ -134,14 +134,22 @@ func (c *Coordinator) loadDefinition() error {
 		}
 		folder = defaultFolder
 	}
-	if c.cfg.CurrentGameDefinition == "" {
-		names, err := config.ListGameDefinitions(folder)
-		if err != nil {
-			return fmt.Errorf("list game definitions: %w", err)
+	names, err := config.ListGameDefinitions(folder)
+	if err != nil {
+		return fmt.Errorf("list game definitions: %w", err)
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("no viable game definition: no JSON definition files found in %s", folder)
+	}
+	selectedDefinitionExists := false
+	for _, name := range names {
+		if name == c.cfg.CurrentGameDefinition {
+			selectedDefinitionExists = true
+			break
 		}
-		if len(names) == 0 {
-			return fmt.Errorf("no viable game definition: no JSON definition files found in %s", folder)
-		}
+	}
+	if !selectedDefinitionExists {
+		c.cfg.CurrentGameDefinition = ""
 	}
 
 	path, filename, err := config.ResolveGameDefinition(folder, c.cfg.CurrentGameDefinition)

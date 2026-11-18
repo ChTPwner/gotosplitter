@@ -4,6 +4,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -90,17 +91,25 @@ func DefaultGameDefinitionFolder() (string, error) {
 	return filepath.Dir(path), nil
 }
 
-// ListGameDefinitions returns JSON definition filenames in alphabetical order.
+// ListGameDefinitions returns JSON definition paths relative to folder in alphabetical order.
 func ListGameDefinitions(folder string) ([]string, error) {
-	entries, err := os.ReadDir(folder)
+	names := make([]string, 0)
+	err := filepath.WalkDir(folder, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
+			return nil
+		}
+		relativePath, err := filepath.Rel(folder, path)
+		if err != nil {
+			return err
+		}
+		names = append(names, filepath.ToSlash(relativePath))
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("read game definition folder %s: %w", folder, err)
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".json") {
-			names = append(names, entry.Name())
-		}
 	}
 	sort.Strings(names)
 	return names, nil
@@ -126,10 +135,12 @@ func ResolveGameDefinition(folder, filename string) (string, string, error) {
 		}
 		filename = names[0]
 	}
-	if filepath.Base(filename) != filename {
-		return "", "", fmt.Errorf("game definition must be a filename inside %s", folder)
+	relativePath := filepath.FromSlash(filename)
+	if !filepath.IsLocal(relativePath) || relativePath == "." {
+		return "", "", fmt.Errorf("game definition must be a path inside %s", folder)
 	}
-	return filepath.Join(folder, filename), filename, nil
+	filename = filepath.ToSlash(filepath.Clean(relativePath))
+	return filepath.Join(folder, relativePath), filename, nil
 }
 
 func Save(cfg *Config) error {

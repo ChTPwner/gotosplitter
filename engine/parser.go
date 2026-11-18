@@ -57,7 +57,8 @@ type IGTConfig struct {
 
 // GameDefinition represents the root schema of a Usb2Snes-Livesplit-Definitions file
 type GameDefinition struct {
-	Name        string            `json:"name"`
+	Name        string            `json:"name,omitempty"`
+	Game        string            `json:"game,omitempty"`
 	Autostart   *Condition        `json:"autostart,omitempty"`
 	IGT         *IGTConfig        `json:"igt,omitempty"`
 	Alias       map[string]string `json:"alias,omitempty"`
@@ -187,7 +188,10 @@ func LoadDefinition(filePath string) (*GameDefinition, error) {
 	}
 
 	if def.Name == "" {
-		return nil, fmt.Errorf("game definition is missing 'name' field")
+		def.Name = def.Game
+	}
+	if def.Name == "" {
+		return nil, fmt.Errorf("game definition is missing both 'name' and 'game' fields")
 	}
 
 	// Parse autostart

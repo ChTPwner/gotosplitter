@@ -64,6 +64,35 @@ func TestLoadDefinitionSelectsFirstAlphabeticalFile(t *testing.T) {
 	}
 }
 
+func TestLoadDefinitionFallsBackWhenSelectionIsMissingFromFolder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	folder := t.TempDir()
+	for name, game := range map[string]string{
+		"zeta.json":  "Zeta",
+		"alpha.json": "Alpha",
+	} {
+		data := []byte(`{"name":"` + game + `","definitions":[]}`)
+		if err := os.WriteFile(filepath.Join(folder, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &config.Config{
+		GameDefinitionFolder:  folder,
+		CurrentGameDefinition: "super_metroid.json",
+	}
+	c := NewCoordinator(cfg)
+	if err := c.loadDefinition(); err != nil {
+		t.Fatalf("loadDefinition() error = %v", err)
+	}
+	if cfg.CurrentGameDefinition != "alpha.json" {
+		t.Fatalf("CurrentGameDefinition = %q, want alpha.json", cfg.CurrentGameDefinition)
+	}
+	if c.definition == nil || c.definition.Name != "Alpha" {
+		t.Fatalf("loaded definition = %#v, want Alpha", c.definition)
+	}
+}
+
 func TestLoadDefinitionRejectsAnEmptyFolder(t *testing.T) {
 	folder := t.TempDir()
 	cfg := &config.Config{GameDefinitionFolder: folder}

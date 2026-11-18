@@ -44,6 +44,13 @@ func TestApplyResetChoice(t *testing.T) {
 	}
 }
 
+func TestChooseDefinitionFallsBackWhenCurrentFileIsMissing(t *testing.T) {
+	names := []string{"alpha.json", "zeta.json"}
+	if got := chooseDefinition(names, "super_metroid.json"); got != "alpha.json" {
+		t.Fatalf("chooseDefinition() = %q, want alpha.json", got)
+	}
+}
+
 func TestSaveResetPreference(t *testing.T) {
 	cfg := config.Config{ResetSNESOnTimerReset: true}
 	saved := false
