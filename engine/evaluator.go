@@ -17,6 +17,9 @@ func Evaluate(cond *Condition, reader MemoryReader) (bool, error) {
 	if cond == nil {
 		return false, nil
 	}
+	if err := validateConditionFields(cond); err != nil {
+		return false, err
+	}
 
 	size := 1
 	if cond.Type == TypeWeq || cond.Type == TypeWgt || cond.Type == TypeWlt {

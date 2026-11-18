@@ -111,6 +111,10 @@ func ParseAndNormalizeCondition(cond *Condition) error {
 		return nil
 	}
 
+	if err := validateConditionFields(cond); err != nil {
+		return err
+	}
+
 	if cond.Address != "" {
 		addr, err := ParseHexUint32(cond.Address)
 		if err != nil {
@@ -157,6 +161,16 @@ func ParseAndNormalizeCondition(cond *Condition) error {
 		}
 	}
 
+	return nil
+}
+
+func validateConditionFields(cond *Condition) error {
+	if strings.TrimSpace(cond.Address) == "" {
+		return fmt.Errorf("condition address must not be empty")
+	}
+	if strings.TrimSpace(cond.Value) == "" {
+		return fmt.Errorf("condition value must not be empty")
+	}
 	return nil
 }
 

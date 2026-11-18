@@ -19,6 +19,9 @@ func TestLoadDefaultSNIAddress(t *testing.T) {
 	if cfg.SNIAddress != "ws://127.0.0.1:23074" {
 		t.Fatalf("SNIAddress = %q, want ws://127.0.0.1:23074", cfg.SNIAddress)
 	}
+	if cfg.ResetSNESOnTimerReset {
+		t.Fatal("ResetSNESOnTimerReset = true, want false by default")
+	}
 	wantFolder := filepath.Join(home, ".config", "gotosplitter")
 	if cfg.GameDefinitionFolder != wantFolder {
 		t.Fatalf("GameDefinitionFolder = %q, want %q", cfg.GameDefinitionFolder, wantFolder)
@@ -110,6 +113,40 @@ func TestSaveWritesConfigUnderHomeConfigDirectory(t *testing.T) {
 	}
 	if got.SNIAddress != want.SNIAddress {
 		t.Fatalf("SNIAddress = %q, want %q", got.SNIAddress, want.SNIAddress)
+	}
+}
+
+func TestLoadResetSNESPreferenceDefaultsFalseAndPersists(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(sniAddressEnv, "")
+
+	configPath := filepath.Join(home, ".config", "gotosplitter", "config.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"sni_address":"ws://config-host:23074"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ResetSNESOnTimerReset {
+		t.Fatal("missing reset preference = true, want false")
+	}
+
+	cfg.ResetSNESOnTimerReset = true
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save() preference error = %v", err)
+	}
+	reloaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load() after preference save error = %v", err)
+	}
+	if !reloaded.ResetSNESOnTimerReset {
+		t.Fatal("reloaded reset preference = false, want true")
 	}
 }
 

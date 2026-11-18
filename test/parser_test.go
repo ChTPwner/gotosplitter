@@ -143,6 +143,21 @@ func TestSuperMetroidDefinitionParsing(t *testing.T) {
 	}
 }
 
+func TestAllBundledDefinitionsParse(t *testing.T) {
+	definitions, err := filepath.Glob(filepath.Join("..", "config", "definitions", "*.json"))
+	if err != nil {
+		t.Fatalf("find bundled definitions: %v", err)
+	}
+	if len(definitions) == 0 {
+		t.Fatal("no bundled definitions found")
+	}
+	for _, path := range definitions {
+		if _, err := engine.LoadDefinition(path); err != nil {
+			t.Errorf("load bundled definition %s: %v", path, err)
+		}
+	}
+}
+
 func TestSuperMetroidConditionEvaluationWithMockMemory(t *testing.T) {
 	mockSNI := NewMockSNI("0")
 	defer mockSNI.Stop()

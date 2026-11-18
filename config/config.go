@@ -21,6 +21,7 @@ type Config struct {
 	GameDefinitionFolder  string `json:"game_definition_folder"`
 	CurrentGameDefinition string `json:"current_game_definition"`
 	EventFile             string `json:"event_file"`
+	ResetSNESOnTimerReset bool   `json:"reset_snes_on_timer_reset"`
 }
 
 func Load() (*Config, error) {

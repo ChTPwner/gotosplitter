@@ -3,6 +3,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -186,6 +187,7 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 
 		var resetDialog *dialog.CustomDialog
 		resetGameCheck := widget.NewCheck("Also reset the SNES game", nil)
+		resetGameCheck.SetChecked(cfg.ResetSNESOnTimerReset)
 		resetDialog = dialog.NewCustomWithoutButtons(
 			"Reset timer",
 			container.NewVBox(
@@ -200,8 +202,11 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 				return
 			}
 			resetSNES := resetGameCheck.Checked
+			cfg.ResetSNESOnTimerReset = resetSNES
+			resetConfig := *cfg
+			saveErr := saveResetPreference(resetConfig, config.Save)
 			go func() {
-				if err := applyResetChoice(choice, resetSNES, onReset); err != nil {
+				if err := applyConfirmedReset(choice, resetSNES, saveErr, onReset); err != nil {
 					fyne.Do(func() {
 						dialog.ShowError(err, w)
 					})
@@ -261,4 +266,25 @@ func applyResetChoice(choice resetChoice, resetSNES bool, onReset ResetHandler) 
 	default:
 		return fmt.Errorf("invalid reset choice %d", choice)
 	}
+}
+
+func saveResetPreference(cfg config.Config, saveConfig func(*config.Config) error) error {
+	if saveConfig == nil {
+		return fmt.Errorf("configuration save handler is unavailable")
+	}
+	if err := saveConfig(&cfg); err != nil {
+		return fmt.Errorf("save SNES reset preference: %w", err)
+	}
+	return nil
+}
+
+func combineResetErrors(saveErr, resetErr error) error {
+	if resetErr != nil {
+		resetErr = fmt.Errorf("reset run: %w", resetErr)
+	}
+	return errors.Join(saveErr, resetErr)
+}
+
+func applyConfirmedReset(choice resetChoice, resetSNES bool, saveErr error, onReset ResetHandler) error {
+	return combineResetErrors(saveErr, applyResetChoice(choice, resetSNES, onReset))
 }
