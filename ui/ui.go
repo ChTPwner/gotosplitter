@@ -19,6 +19,7 @@ import (
 type (
 	DefinitionSelectionHandler func(folder, filename string) error
 	ResetHandler               func(saveAttempt, resetSNES bool) error
+	StatusUpdateHandler        func(sniStatus, wsStatus string)
 )
 
 type resetChoice uint8
@@ -57,7 +58,7 @@ func ShowStartupError(ctx context.Context, startupErr error) error {
 	return nil
 }
 
-func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange DefinitionSelectionHandler, onReset ResetHandler) error {
+func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange DefinitionSelectionHandler, onReset ResetHandler, onStatusUpdate StatusUpdateHandler) error {
 	if cfg == nil {
 		return fmt.Errorf("configuration is required")
 	}
@@ -76,6 +77,9 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 	folderEntry.SetPlaceHolder("Select a folder containing JSON definitions")
 	definitionSelect := widget.NewSelect(nil, nil)
 	status := widget.NewLabel("")
+
+	sniStatus := widget.NewLabel("Disconnected")
+	wsStatus := widget.NewLabel("Waiting for LiveSplit One...")
 
 	currentFolder := cfg.GameDefinitionFolder
 	currentDefinition := cfg.CurrentGameDefinition
@@ -214,9 +218,14 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 		widget.NewLabel("Current game definition"),
 		definitionSelect,
 		resetButton,
+		widget.NewLabel("Status"),
 		status,
+		widget.NewLabel("SNI Status"),
+		sniStatus,
+		widget.NewLabel("WebSocket Status"),
+		wsStatus,
 	))
-	w.Resize(fyne.NewSize(640, 220))
+	w.Resize(fyne.NewSize(640, 300))
 
 	var closeOnce sync.Once
 	closed := make(chan struct{})
