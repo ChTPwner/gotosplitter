@@ -28,3 +28,5 @@ LiveSplit One does not expose game or category metadata through its WebSocket pr
 ## Running
 
 Run `go run .` to start GotoSplitter and open its settings window. The application starts its LiveSplit One WebSocket server at `ws://localhost:16834` and connects to SNI at `ws://127.0.0.1:23074` by default.
+
+Set `GOTOSPLITTER_DEBUG=1` to print evaluator memory-monitoring diagnostics in the terminal. Each normalized memory address is logged once per process.

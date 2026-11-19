@@ -5,11 +5,29 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"os"
+	"sync"
 )
+
+const debugEnv = "GOTOSPLITTER_DEBUG"
+
+var loggedAddresses sync.Map
 
 // MemoryReader defines the standard interface for reading SNES memory
 type MemoryReader interface {
 	ReadMemory(address uint32, size int) ([]byte, error)
+}
+
+func logMonitoringAddress(cond *Condition, normalizedAddr uint32, size int, data []byte, returnedValue uint64) {
+	if os.Getenv(debugEnv) != "1" {
+		return
+	}
+	if _, logged := loggedAddresses.LoadOrStore(normalizedAddr, struct{}{}); logged {
+		return
+	}
+
+	log.Printf("monitoring address 0x%X (normalized to 0x%X, size=%d, type=%s): expected=0x%X returned=0x%X (bytes=% X)",
+		cond.ParsedAddress, normalizedAddr, size, cond.Type, cond.ParsedValue, returnedValue, data[:size])
 }
 
 // Evaluate evaluates a condition and any concurrent 'more' conditions against a MemoryReader.
@@ -40,8 +58,7 @@ func Evaluate(cond *Condition, reader MemoryReader) (bool, error) {
 	if size == 2 {
 		returnedValue = uint64(binary.LittleEndian.Uint16(data))
 	}
-	log.Printf("monitoring address 0x%X (normalized to 0x%X, size=%d, type=%s): expected=0x%X returned=0x%X (bytes=% X)",
-		cond.ParsedAddress, normalizedAddr, size, cond.Type, cond.ParsedValue, returnedValue, data[:size])
+	logMonitoringAddress(cond, normalizedAddr, size, data, returnedValue)
 
 	var matched bool
 	switch cond.Type {

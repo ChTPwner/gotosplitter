@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"bytes"
+	"fmt"
+	"log"
 	"strings"
 	"testing"
 )
@@ -70,5 +73,43 @@ func TestParseAndNormalizeConditionRejectsEmptyAddressAndValue(t *testing.T) {
 				t.Fatalf("ParseAndNormalizeCondition() error = %v, want %s validation error", err, tt.wantErrPart)
 			}
 		})
+	}
+}
+
+func TestEvaluateMonitoringLogRequiresDebugAndIsDeduplicatedByNormalizedAddress(t *testing.T) {
+	var output bytes.Buffer
+	previousOutput := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previousOutput)
+
+	t.Setenv(debugEnv, "")
+	disabledCondition := &Condition{
+		Address:       "0x7E0020",
+		Value:         "0x00",
+		Type:          TypeEq,
+		ParsedAddress: 0x7E0020,
+	}
+	if _, err := Evaluate(disabledCondition, &countingMemoryReader{}); err != nil {
+		t.Fatalf("Evaluate() with debug disabled error = %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("debug-disabled output = %q, want no output", output.String())
+	}
+
+	t.Setenv(debugEnv, "1")
+	for _, address := range []uint32{0x7E0010, 0xF50010, 0x7E0011} {
+		condition := &Condition{
+			Address:       fmt.Sprintf("0x%X", address),
+			Value:         "0x00",
+			Type:          TypeEq,
+			ParsedAddress: address,
+		}
+		if _, err := Evaluate(condition, &countingMemoryReader{}); err != nil {
+			t.Fatalf("Evaluate() at 0x%X error = %v", address, err)
+		}
+	}
+
+	if got := strings.Count(output.String(), "monitoring address"); got != 2 {
+		t.Fatalf("monitoring log count = %d, want 2 (one per normalized address); output: %q", got, output.String())
 	}
 }
