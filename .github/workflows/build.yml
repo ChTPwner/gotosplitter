@@ -1,0 +1,213 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION_FILE: go.mod
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linux: test, build, then package as .deb, .rpm, and AUR PKGBUILD
+  # ---------------------------------------------------------------------------
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+
+      - name: Install Fyne system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxi-dev \
+            libxxf86vm-dev
+
+      - name: Test
+        run: CGO_ENABLED=1 go test ./...
+
+      - name: Determine version
+        id: version
+        run: |
+          # Use git tag if available, otherwise short SHA
+          TAG=$(git describe --tags --exact-match 2>/dev/null || true)
+          if [ -n "$TAG" ]; then
+            VERSION="${TAG#v}"
+          else
+            VERSION="0.0.0~$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Build
+        run: |
+          CGO_ENABLED=1 go build \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o gotosplitter .
+
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Build .deb
+        run: |
+          VERSION=${{ steps.version.outputs.version }} \
+            nfpm pkg --packager deb --target gotosplitter_${{ steps.version.outputs.version }}_amd64.deb
+
+      - name: Build .rpm
+        run: |
+          VERSION=${{ steps.version.outputs.version }} \
+            nfpm pkg --packager rpm --target gotosplitter-${{ steps.version.outputs.version }}.x86_64.rpm
+
+      - name: Generate AUR PKGBUILD
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          # For tagged releases, compute source hash; otherwise use SKIP
+          if git describe --tags --exact-match 2>/dev/null; then
+            SHA256=$(sha256sum gotosplitter | awk '{print $1}')
+          else
+            SHA256="SKIP"
+          fi
+          sed \
+            -e "s/@@VERSION@@/${VERSION}/g" \
+            -e "s/@@SHA256@@/${SHA256}/g" \
+            packaging/PKGBUILD.template > PKGBUILD
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: gotosplitter-deb
+          path: gotosplitter_*.deb
+
+      - name: Upload .rpm
+        uses: actions/upload-artifact@v4
+        with:
+          name: gotosplitter-rpm
+          path: gotosplitter-*.rpm
+
+      - name: Upload PKGBUILD
+        uses: actions/upload-artifact@v4
+        with:
+          name: gotosplitter-pkgbuild
+          path: PKGBUILD
+
+  # ---------------------------------------------------------------------------
+  # macOS: test, build universal binary, create .app bundle and .dmg
+  # ---------------------------------------------------------------------------
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+
+      - name: Test
+        run: go test ./...
+
+      - name: Determine version
+        id: version
+        run: |
+          TAG=$(git describe --tags --exact-match 2>/dev/null || true)
+          if [ -n "$TAG" ]; then
+            VERSION="${TAG#v}"
+          else
+            VERSION="0.0.0-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Build arm64 binary
+        run: |
+          CGO_ENABLED=1 GOARCH=arm64 go build \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o gotosplitter-arm64 .
+
+      - name: Build amd64 binary
+        run: |
+          CGO_ENABLED=1 GOARCH=amd64 go build \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o gotosplitter-amd64 .
+
+      - name: Create universal binary
+        run: lipo -create -output gotosplitter gotosplitter-arm64 gotosplitter-amd64
+
+      - name: Generate .icns from png (if no .icns exists)
+        run: |
+          if [ ! -f packaging/gotosplitter.icns ]; then
+            mkdir -p gotosplitter.iconset
+            # Generate all required sizes from the 256px source
+            sips -z 16 16     packaging/gotosplitter.png --out gotosplitter.iconset/icon_16x16.png
+            sips -z 32 32     packaging/gotosplitter.png --out gotosplitter.iconset/icon_16x16@2x.png
+            sips -z 32 32     packaging/gotosplitter.png --out gotosplitter.iconset/icon_32x32.png
+            sips -z 64 64     packaging/gotosplitter.png --out gotosplitter.iconset/icon_32x32@2x.png
+            sips -z 128 128   packaging/gotosplitter.png --out gotosplitter.iconset/icon_128x128.png
+            sips -z 256 256   packaging/gotosplitter.png --out gotosplitter.iconset/icon_128x128@2x.png
+            sips -z 256 256   packaging/gotosplitter.png --out gotosplitter.iconset/icon_256x256.png
+            iconutil -c icns gotosplitter.iconset -o gotosplitter.icns
+          else
+            cp packaging/gotosplitter.icns gotosplitter.icns
+          fi
+
+      - name: Create .app bundle
+        run: |
+          APP="GotoSplitter.app"
+          mkdir -p "${APP}/Contents/MacOS"
+          mkdir -p "${APP}/Contents/Resources"
+
+          # Copy binary
+          cp gotosplitter "${APP}/Contents/MacOS/gotosplitter"
+          chmod +x "${APP}/Contents/MacOS/gotosplitter"
+
+          # Copy icon
+          cp gotosplitter.icns "${APP}/Contents/Resources/gotosplitter.icns"
+
+          # Write Info.plist from template
+          sed "s/@@VERSION@@/${{ steps.version.outputs.version }}/g" \
+            packaging/Info.plist > "${APP}/Contents/Info.plist"
+
+      - name: Create .dmg
+        run: |
+          DMG_NAME="GotoSplitter-${{ steps.version.outputs.version }}-macOS.dmg"
+
+          # Create a temporary directory for the DMG contents
+          mkdir -p dmg-staging
+          cp -R GotoSplitter.app dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+
+          # Create the DMG
+          hdiutil create \
+            -volname "GotoSplitter" \
+            -srcfolder dmg-staging \
+            -ov \
+            -format UDZO \
+            "${DMG_NAME}"
+
+          echo "dmg_name=${DMG_NAME}" >> "$GITHUB_ENV"
+
+      - name: Upload .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: gotosplitter-dmg
+          path: GotoSplitter-*.dmg

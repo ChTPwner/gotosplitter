@@ -1,1 +1,10 @@
 gotosplitter
+gotosplitter-arm64
+gotosplitter-amd64
+
+# Packaging artifacts
+*.deb
+*.rpm
+*.dmg
+PKGBUILD
+*.iconset/

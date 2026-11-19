@@ -1,0 +1,20 @@
+name: gotosplitter
+arch: amd64
+platform: linux
+version: "${VERSION:-0.0.0}"
+maintainer: "ChTPwner"
+description: "Cross-platform SNES autosplitter bridging SNI/QUsb2Snes to LiveSplit One"
+homepage: "https://github.com/chtpwner/GotoSplitter"
+license: MIT
+contents:
+  - src: gotosplitter
+    dst: /usr/bin/gotosplitter
+    file_info:
+      mode: 0755
+  - src: config/definitions/
+    dst: /usr/share/gotosplitter/definitions/
+    type: tree
+  - src: packaging/gotosplitter.desktop
+    dst: /usr/share/applications/gotosplitter.desktop
+  - src: packaging/gotosplitter.png
+    dst: /usr/share/icons/hicolor/256x256/apps/gotosplitter.png

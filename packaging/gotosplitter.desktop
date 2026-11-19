@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=GotoSplitter
+Comment=SNES autosplitter bridging SNI/QUsb2Snes to LiveSplit One
+Exec=gotosplitter
+Icon=gotosplitter
+Terminal=false
+Type=Application
+Categories=Utility;Game;
+Keywords=speedrun;autosplitter;livesplit;snes;

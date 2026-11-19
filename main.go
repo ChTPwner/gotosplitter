@@ -13,6 +13,9 @@ import (
 	"goto_splitter/utils/logging"
 )
 
+// Version is set at build time via -ldflags.
+var Version = "dev"
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
