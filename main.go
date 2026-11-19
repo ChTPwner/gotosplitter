@@ -35,7 +35,7 @@ func main() {
 	}
 	logging.GetLogger().Info("GotoSplitter runtime started; LiveSplit server listening at %s", c.ServerURL())
 
-	if err := ui.RunUI(ctx, cfg, c.SetGameDefinition, c.ResetTimerWithOptions); err != nil {
+	if err := ui.RunUI(ctx, cfg, c.SetGameDefinition, c.ResetTimerWithOptions, func(sniStatus, wsStatus string) {}); err != nil {
 		logging.GetLogger().Error("UI stopped with an error: %v", err)
 	}
 	stop()
