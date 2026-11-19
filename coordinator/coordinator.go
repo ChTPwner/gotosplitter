@@ -324,6 +324,13 @@ func (c *Coordinator) pollOnce() error {
 			if shouldLog {
 				log.Printf("LiveSplit current split %q has no matching definition", currentSplitName)
 			}
+			if err := c.dispatchAction("skip"); err != nil {
+				return err
+			}
+			c.mu.Lock()
+			c.currentSplitName = ""
+			c.unmatchedSplitName = ""
+			c.mu.Unlock()
 			return nil
 		}
 		c.mu.Lock()

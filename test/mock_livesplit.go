@@ -167,6 +167,7 @@ func (m *MockLiveSplit) handleCommand(conn *websocket.Conn, message []byte) bool
 		recordAction = true
 	case "skipSplit":
 		m.currentIndex++
+		m.currentSplitName = ""
 		event = "Skipped"
 		recordAction = true
 	case "getCurrentState":
