@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +23,7 @@ func (r staticMemoryReader) ReadMemory(address uint32, size int) ([]byte, error)
 	return r.data[start : start+size], nil
 }
 
-func TestStartFailsBeforeStartingLiveSplitServer(t *testing.T) {
+func TestStartKeepsLiveSplitRunningWithDefinitionStartupError(t *testing.T) {
 	cfg := &config.Config{
 		LiveSplitAddress:      "127.0.0.1:0",
 		GameDefinitionFolder:  t.TempDir(),
@@ -30,12 +31,16 @@ func TestStartFailsBeforeStartingLiveSplitServer(t *testing.T) {
 	}
 
 	c := NewCoordinator(cfg)
-	if err := c.Start(context.Background()); err == nil {
-		t.Fatal("expected start to fail on invalid game definition")
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v, want runtime services to continue", err)
 	}
-	if c.ServerURL() != "" {
-		t.Fatalf("expected no server URL before a successful start, got %q", c.ServerURL())
+	if c.ServerURL() == "" {
+		t.Fatal("expected LiveSplit server to start despite definition startup error")
 	}
+	if c.StartupDefinitionError() == nil {
+		t.Fatal("expected startup definition error to be retained")
+	}
+	t.Cleanup(func() { _ = c.Stop() })
 }
 
 func TestLoadDefinitionSelectsFirstAlphabeticalFile(t *testing.T) {
@@ -109,18 +114,22 @@ func TestLoadDefinitionRejectsAnEmptyFolder(t *testing.T) {
 	}
 }
 
-func TestStartFailsWhenDefinitionFolderHasNoViableFile(t *testing.T) {
+func TestStartKeepsRunningWhenDefinitionFolderHasNoViableFile(t *testing.T) {
 	cfg := &config.Config{
 		LiveSplitAddress:     "127.0.0.1:0",
 		GameDefinitionFolder: t.TempDir(),
 	}
 	c := NewCoordinator(cfg)
-	if err := c.Start(context.Background()); err == nil {
-		t.Fatal("expected Start() to fail without a viable definition")
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v, want runtime services to continue", err)
 	}
-	if c.ServerURL() != "" {
-		t.Fatalf("expected no LiveSplit server URL, got %q", c.ServerURL())
+	if c.ServerURL() == "" {
+		t.Fatal("expected LiveSplit server to start despite missing definition")
 	}
+	if c.StartupDefinitionError() == nil {
+		t.Fatal("expected startup definition error to be retained")
+	}
+	t.Cleanup(func() { _ = c.Stop() })
 }
 
 func TestLoadDefinitionRejectsUnparseableDefinition(t *testing.T) {
@@ -148,8 +157,12 @@ func TestSetGameDefinitionPersistsAndAppliesSelection(t *testing.T) {
 
 	cfg := &config.Config{}
 	c := NewCoordinator(cfg)
+	c.startupDefinitionErr = errors.New("no viable game definition")
 	if err := c.SetGameDefinition(folder, "game.json"); err != nil {
 		t.Fatalf("SetGameDefinition() error = %v", err)
+	}
+	if c.StartupDefinitionError() != nil {
+		t.Fatal("startup definition error was not cleared after a valid selection")
 	}
 	if c.definition == nil || c.definition.Name != "Test Game" {
 		t.Fatalf("active definition = %#v, want Test Game", c.definition)

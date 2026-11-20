@@ -33,9 +33,12 @@ func main() {
 		failStartup(ctx, fmt.Errorf("failed to start coordinator: %w", err))
 		return
 	}
+	if startupErr := c.StartupDefinitionError(); startupErr != nil {
+		logging.GetLogger().Error("game definition startup error: %v", startupErr)
+	}
 	logging.GetLogger().Info("GotoSplitter runtime started; LiveSplit server listening at %s", c.ServerURL())
 
-	if err := ui.RunUI(ctx, cfg, c.SetGameDefinition, c.ResetTimerWithOptions, func(sniStatus, wsStatus string) {}); err != nil {
+	if err := ui.RunUI(ctx, cfg, c.StartupDefinitionError(), c.SetGameDefinition, c.ResetTimerWithOptions, func(sniStatus, wsStatus string) {}); err != nil {
 		logging.GetLogger().Error("UI stopped with an error: %v", err)
 	}
 	stop()

@@ -82,8 +82,8 @@ graph TD
    - If a graphical display server (X11, Wayland, macOS Quartz) is unavailable (e.g. running on a headless server, Docker container, or CI), gracefully fallback to a clean CLI/terminal logger mode without crashing.
 
 7. **Startup Definition Errors**:
-   - If no viable game definition can be resolved and parsed from configuration, show the error in a visible startup window and print it to the terminal.
-   - Exit with a failure status after the error is acknowledged or the UI closes.
+   - If no viable game definition can be resolved and parsed from configuration, reflect the error in the UI and log it to the terminal.
+   - Allow the user to continue using the application with default settings.
 
 8. **Reset Confirmation**:
    - When the user requests a timer reset, show a modal with Save attempt & reset, Discard attempt, and Cancel.

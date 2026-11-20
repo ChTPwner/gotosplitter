@@ -31,6 +31,7 @@ type SNI struct {
 	mu          sync.Mutex
 	attachedDev string
 	connected   bool
+	message string
 }
 
 // NewClient creates a new SNI client instance

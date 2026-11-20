@@ -51,6 +51,17 @@ func TestChooseDefinitionFallsBackWhenCurrentFileIsMissing(t *testing.T) {
 	}
 }
 
+func TestFormatStartupDefinitionError(t *testing.T) {
+	err := errors.New("no viable game definition")
+	got := formatStartupDefinitionError(err)
+	if !strings.Contains(got, "Game definition error") || !strings.Contains(got, err.Error()) {
+		t.Fatalf("formatted startup error = %q, want visible error text", got)
+	}
+	if got := formatStartupDefinitionError(nil); got != "" {
+		t.Fatalf("nil startup error formatting = %q, want empty", got)
+	}
+}
+
 func TestSaveResetPreference(t *testing.T) {
 	cfg := config.Config{ResetSNESOnTimerReset: true}
 	saved := false

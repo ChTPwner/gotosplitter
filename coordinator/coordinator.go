@@ -19,12 +19,14 @@ const defaultPollInterval = 50 * time.Millisecond
 // Coordinator is the system runtime that wires together the LiveSplit server,
 // the SNI bridge, and the split evaluator.
 type Coordinator struct {
-	cfg          *config.Config
-	server       *livesplit.Server
-	sniClient    *sni.SNI
-	definition   *engine.GameDefinition
-	trackers     *engine.NextTracker
-	pollInterval time.Duration
+	cfg                  *config.Config
+	server               *livesplit.Server
+	sniClient            *sni.SNI
+	definition           *engine.GameDefinition
+	trackers             *engine.NextTracker
+	pollInterval         time.Duration
+	pollError            error
+	startupDefinitionErr error
 
 	operationMu        sync.Mutex
 	mu                 sync.Mutex
@@ -61,7 +63,15 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	}
 
 	if err := c.loadDefinition(); err != nil {
-		return fmt.Errorf("load definition: %w", err)
+		definitionErr := fmt.Errorf("load definition: %w", err)
+		c.mu.Lock()
+		c.startupDefinitionErr = definitionErr
+		c.mu.Unlock()
+		log.Printf("game definition startup error: %v", definitionErr)
+	} else {
+		c.mu.Lock()
+		c.startupDefinitionErr = nil
+		c.mu.Unlock()
 	}
 
 	if c.server == nil {
@@ -108,6 +118,14 @@ func (c *Coordinator) ServerURL() string {
 		return ""
 	}
 	return c.server.URL()
+}
+
+// StartupDefinitionError returns the definition error encountered during startup,
+// or nil if a viable definition was loaded.
+func (c *Coordinator) StartupDefinitionError() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.startupDefinitionErr
 }
 
 // Stop shuts down the coordinator cleanly.
@@ -225,6 +243,9 @@ func (c *Coordinator) SetGameDefinition(folder, filename string) error {
 	c.currentSplitName = ""
 	c.unmatchedSplitName = ""
 	c.trackers.Reset()
+	if def != nil {
+		c.startupDefinitionErr = nil
+	}
 	c.mu.Unlock()
 	return nil
 }
@@ -239,7 +260,10 @@ func (c *Coordinator) runLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := c.pollOnce(); err != nil {
-				log.Printf("coordinator tick: %v", err)
+				// Only log the error if it's different from the last one to avoid spamming the logs.
+				if c.pollError != err {
+					log.Printf("coordinator tick: %v", err)
+				}
 			}
 		}
 	}
@@ -260,6 +284,7 @@ func (c *Coordinator) pollOnce() error {
 	}
 	if !c.sniClient.IsConnected() {
 		if err := c.sniClient.Connect(); err != nil {
+			c.pollError = err
 			return err
 		}
 		log.Printf("SNI connected to %s", c.sniClient.AttachedDevice())
@@ -288,10 +313,12 @@ func (c *Coordinator) pollOnce() error {
 		}
 		matched, err := tracker.Evaluate(def.Autostart, c.sniClient)
 		if err != nil {
+			c.pollError = err
 			return err
 		}
 		if matched {
 			if err := c.dispatchAction("start"); err != nil {
+				c.pollError = err
 				return err
 			}
 			c.mu.Lock()
@@ -325,6 +352,7 @@ func (c *Coordinator) pollOnce() error {
 				log.Printf("LiveSplit current split %q has no matching definition", currentSplitName)
 			}
 			if err := c.dispatchAction("skip"); err != nil {
+				c.pollError = err
 				return err
 			}
 			c.mu.Lock()
@@ -341,10 +369,12 @@ func (c *Coordinator) pollOnce() error {
 	}
 	matched, err := engine.Evaluate(&def.Definitions[splitIndex], c.sniClient)
 	if err != nil {
+		c.pollError = err
 		return err
 	}
 	if matched {
 		if err := c.dispatchAction("split"); err != nil {
+			c.pollError = err
 			return err
 		}
 		c.mu.Lock()

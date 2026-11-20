@@ -58,7 +58,7 @@ func ShowStartupError(ctx context.Context, startupErr error) error {
 	return nil
 }
 
-func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange DefinitionSelectionHandler, onReset ResetHandler, onStatusUpdate StatusUpdateHandler) error {
+func RunUI(ctx context.Context, cfg *config.Config, startupErr error, onDefinitionChange DefinitionSelectionHandler, onReset ResetHandler, onStatusUpdate StatusUpdateHandler) error {
 	if cfg == nil {
 		return fmt.Errorf("configuration is required")
 	}
@@ -77,6 +77,9 @@ func RunUI(ctx context.Context, cfg *config.Config, onDefinitionChange Definitio
 	folderEntry.SetPlaceHolder("Select a folder containing JSON definitions")
 	definitionSelect := widget.NewSelect(nil, nil)
 	status := widget.NewLabel("")
+	if startupErr != nil {
+		status.SetText(formatStartupDefinitionError(startupErr))
+	}
 
 	sniStatus := widget.NewLabel("Disconnected")
 	wsStatus := widget.NewLabel("Waiting for LiveSplit One...")
@@ -253,6 +256,13 @@ func chooseDefinition(names []string, current string) string {
 		return names[0]
 	}
 	return ""
+}
+
+func formatStartupDefinitionError(startupErr error) string {
+	if startupErr == nil {
+		return ""
+	}
+	return fmt.Sprintf("Game definition error: %v", startupErr)
 }
 
 func resetChoiceButtons(onChoice func(resetChoice)) []fyne.CanvasObject {
