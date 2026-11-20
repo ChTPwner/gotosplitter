@@ -128,6 +128,43 @@ func (c *Coordinator) StartupDefinitionError() error {
 	return c.startupDefinitionErr
 }
 
+// Status returns the current status strings for SNI and LiveSplit One.
+func (c *Coordinator) Status() (sniStatus, wsStatus string) {
+	c.mu.Lock()
+	pollErr := c.pollError
+	c.mu.Unlock()
+
+	// 1. SNI status
+	if c.sniClient != nil && c.sniClient.IsConnected() {
+		dev := c.sniClient.AttachedDevice()
+		if dev != "" {
+			sniStatus = fmt.Sprintf("Attached: %s", dev)
+		} else {
+			sniStatus = "Connected"
+		}
+	} else if pollErr != nil {
+		sniStatus = "Disconnected (Retrying...)"
+	} else if c.cfg != nil && c.cfg.SNIAddress != "" {
+		sniStatus = fmt.Sprintf("Connecting to %s...", c.cfg.SNIAddress)
+	} else {
+		sniStatus = "Disconnected"
+	}
+
+	// 2. LiveSplit status
+	if c.server != nil && c.server.ConnectedClients() > 0 {
+		count := c.server.ConnectedClients()
+		if count == 1 {
+			wsStatus = "Connected (1 client)"
+		} else {
+			wsStatus = fmt.Sprintf("Connected (%d clients)", count)
+		}
+	} else {
+		wsStatus = "Waiting for LiveSplit One client..."
+	}
+
+	return sniStatus, wsStatus
+}
+
 // Stop shuts down the coordinator cleanly.
 func (c *Coordinator) Stop() error {
 	if c.sniClient != nil {
@@ -254,6 +291,7 @@ func (c *Coordinator) runLoop(ctx context.Context) {
 	ticker := time.NewTicker(c.pollInterval)
 	defer ticker.Stop()
 
+	var lastPollErr error
 	for {
 		select {
 		case <-ctx.Done():
@@ -261,9 +299,12 @@ func (c *Coordinator) runLoop(ctx context.Context) {
 		case <-ticker.C:
 			if err := c.pollOnce(); err != nil {
 				// Only log the error if it's different from the last one to avoid spamming the logs.
-				if c.pollError != err {
-					log.Printf("coordinator tick: %v", err)
+				if lastPollErr == nil || lastPollErr.Error() != err.Error() {
+					log.Printf("SNI connection error: %v", err)
+					lastPollErr = err
 				}
+			} else {
+				lastPollErr = nil
 			}
 		}
 	}
@@ -284,9 +325,14 @@ func (c *Coordinator) pollOnce() error {
 	}
 	if !c.sniClient.IsConnected() {
 		if err := c.sniClient.Connect(); err != nil {
+			c.mu.Lock()
 			c.pollError = err
+			c.mu.Unlock()
 			return err
 		}
+		c.mu.Lock()
+		c.pollError = nil
+		c.mu.Unlock()
 		log.Printf("SNI connected to %s", c.sniClient.AttachedDevice())
 	}
 	if c.server.ConnectedClients() == 0 {

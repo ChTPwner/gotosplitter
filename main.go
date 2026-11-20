@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,8 +38,13 @@ func main() {
 		logging.GetLogger().Error("game definition startup error: %v", startupErr)
 	}
 	logging.GetLogger().Info("GotoSplitter runtime started; LiveSplit server listening at %s", c.ServerURL())
+	log.Printf("GotoSplitter runtime started; LiveSplit server listening at %s", c.ServerURL())
 
-	if err := ui.RunUI(ctx, cfg, c.StartupDefinitionError(), c.SetGameDefinition, c.ResetTimerWithOptions, func(sniStatus, wsStatus string) {}); err != nil {
+	initialSNI, initialWS := c.Status()
+	log.Printf("SNI status: %s | LiveSplit status: %s", initialSNI, initialWS)
+	logging.GetLogger().Info("SNI status: %s | LiveSplit status: %s", initialSNI, initialWS)
+
+	if err := ui.RunUI(ctx, cfg, c.StartupDefinitionError(), c.SetGameDefinition, c.ResetTimerWithOptions, c.Status); err != nil {
 		logging.GetLogger().Error("UI stopped with an error: %v", err)
 	}
 	stop()

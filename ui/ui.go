@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -14,12 +16,14 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"goto_splitter/config"
+	"goto_splitter/utils/logging"
 )
 
 type (
 	DefinitionSelectionHandler func(folder, filename string) error
 	ResetHandler               func(saveAttempt, resetSNES bool) error
 	StatusUpdateHandler        func(sniStatus, wsStatus string)
+	StatusProvider             func() (sniStatus, wsStatus string)
 )
 
 type resetChoice uint8
@@ -58,7 +62,7 @@ func ShowStartupError(ctx context.Context, startupErr error) error {
 	return nil
 }
 
-func RunUI(ctx context.Context, cfg *config.Config, startupErr error, onDefinitionChange DefinitionSelectionHandler, onReset ResetHandler, onStatusUpdate StatusUpdateHandler) error {
+func RunUI(ctx context.Context, cfg *config.Config, startupErr error, onDefinitionChange DefinitionSelectionHandler, onReset ResetHandler, statusSource any) error {
 	if cfg == nil {
 		return fmt.Errorf("configuration is required")
 	}
@@ -68,6 +72,19 @@ func RunUI(ctx context.Context, cfg *config.Config, startupErr error, onDefiniti
 			return err
 		}
 		cfg.GameDefinitionFolder = folder
+	}
+
+	var statusProvider StatusProvider
+	var statusHandler StatusUpdateHandler
+	switch s := statusSource.(type) {
+	case StatusProvider:
+		statusProvider = s
+	case func() (string, string):
+		statusProvider = StatusProvider(s)
+	case StatusUpdateHandler:
+		statusHandler = s
+	case func(string, string):
+		statusHandler = StatusUpdateHandler(s)
 	}
 
 	a := app.New()
@@ -81,8 +98,26 @@ func RunUI(ctx context.Context, cfg *config.Config, startupErr error, onDefiniti
 		status.SetText(formatStartupDefinitionError(startupErr))
 	}
 
-	sniStatus := widget.NewLabel("Disconnected")
-	wsStatus := widget.NewLabel("Waiting for LiveSplit One...")
+	sniStatus := NewStatusIndicator("Disconnected", ColorForState(StatusStateDisconnected))
+	wsStatus := NewStatusIndicator("Waiting for LiveSplit One...", ColorForState(StatusStateConnecting))
+
+	if statusProvider != nil {
+		initSNI, initWS := statusProvider()
+		if initSNI != "" {
+			sniStatus.SetStatus(initSNI)
+		}
+		if initWS != "" {
+			wsStatus.SetStatus(initWS)
+		}
+		log.Printf("SNI status: %s | LiveSplit status: %s", sniStatus.Text(), wsStatus.Text())
+		logging.GetLogger().Info("SNI status: %s | LiveSplit status: %s", sniStatus.Text(), wsStatus.Text())
+		if statusHandler != nil {
+			statusHandler(sniStatus.Text(), wsStatus.Text())
+		}
+	} else {
+		log.Printf("SNI status: %s | LiveSplit status: %s", sniStatus.Text(), wsStatus.Text())
+		logging.GetLogger().Info("SNI status: %s | LiveSplit status: %s", sniStatus.Text(), wsStatus.Text())
+	}
 
 	currentFolder := cfg.GameDefinitionFolder
 	currentDefinition := cfg.CurrentGameDefinition
@@ -235,6 +270,43 @@ func RunUI(ctx context.Context, cfg *config.Config, startupErr error, onDefiniti
 	w.SetOnClosed(func() {
 		closeOnce.Do(func() { close(closed) })
 	})
+	if statusProvider != nil {
+		go func() {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			lastSNI := sniStatus.Text()
+			lastWS := wsStatus.Text()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-closed:
+					return
+				case <-ticker.C:
+					currSNI, currWS := statusProvider()
+					changed := false
+					if currSNI != lastSNI {
+						sniStatus.SetStatus(currSNI)
+						lastSNI = currSNI
+						changed = true
+					}
+					if currWS != lastWS {
+						wsStatus.SetStatus(currWS)
+						lastWS = currWS
+						changed = true
+					}
+					if changed {
+						log.Printf("SNI status: %s | LiveSplit status: %s", currSNI, currWS)
+						logging.GetLogger().Info("SNI status: %s | LiveSplit status: %s", currSNI, currWS)
+						if statusHandler != nil {
+							statusHandler(currSNI, currWS)
+						}
+					}
+				}
+			}
+		}()
+	}
 	go func() {
 		select {
 		case <-ctx.Done():

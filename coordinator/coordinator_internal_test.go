@@ -241,3 +241,41 @@ func TestResetTimerFailurePreservesTrackingState(t *testing.T) {
 			c.runStarted, c.splitIndex, c.currentSplitName, c.unmatchedSplitName)
 	}
 }
+
+func TestCoordinatorStatus(t *testing.T) {
+	cfg := &config.Config{
+		SNIAddress:       "ws://localhost:8080",
+		LiveSplitAddress: "127.0.0.1:0",
+	}
+	c := NewCoordinator(cfg)
+
+	// Initial status without clients
+	sniStatus, wsStatus := c.Status()
+	if sniStatus != "Connecting to ws://localhost:8080..." {
+		t.Fatalf("initial sniStatus = %q, want %q", sniStatus, "Connecting to ws://localhost:8080...")
+	}
+	if wsStatus != "Waiting for LiveSplit One client..." {
+		t.Fatalf("initial wsStatus = %q, want %q", wsStatus, "Waiting for LiveSplit One client...")
+	}
+
+	// Status after SNI poll error
+	c.mu.Lock()
+	c.pollError = errors.New("connection refused")
+	c.mu.Unlock()
+
+	sniStatus, _ = c.Status()
+	if sniStatus != "Disconnected (Retrying...)" {
+		t.Fatalf("sniStatus with pollError = %q, want %q", sniStatus, "Disconnected (Retrying...)")
+	}
+
+	// Status with empty SNI address
+	c.cfg.SNIAddress = ""
+	c.mu.Lock()
+	c.pollError = nil
+	c.mu.Unlock()
+
+	sniStatus, _ = c.Status()
+	if sniStatus != "Disconnected" {
+		t.Fatalf("sniStatus with empty address = %q, want %q", sniStatus, "Disconnected")
+	}
+}
